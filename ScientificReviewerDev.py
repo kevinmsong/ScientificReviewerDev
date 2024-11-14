@@ -8,7 +8,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-import logging
+import loggingimport logging
 from openai import OpenAI
 from langchain_openai import ChatOpenAI
 from langchain.schema import HumanMessage
@@ -1883,7 +1883,7 @@ def main_content():
             # Debug mode checkbox
             debug_mode = st.checkbox(
                 "Debug Mode",
-                value=st.session_state.debug_mode,value=st.session_state.debug_mode,
+                value=st.session_state.debug_mode,
                 key="debug_checkbox"
             )
             st.session_state.debug_mode = debug_mode
