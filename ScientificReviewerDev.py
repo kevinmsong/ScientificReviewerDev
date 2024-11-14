@@ -943,240 +943,111 @@ def show_selected_review():
         )
 
 def show_configuration_tab():
-    """Display the configuration interface."""
-    # Document Configuration Section
     st.markdown('<h2 class="section-header">Document Configuration</h2>', unsafe_allow_html=True)
-
-    # Initialize default settings
     review_defaults = initialize_review_settings()
-
     col1, col2 = st.columns(2)
-
+    
     with col1:
-        # Document type selection
-        doc_type = st.selectbox(
-            "Document Type",
-            options=list(review_defaults.keys()),
-            key="doc_type"
-        )
-
-        # Set default values based on document type
+        doc_type = st.selectbox("Document Type", options=list(review_defaults.keys()), key="doc_type")
         default_settings = review_defaults[doc_type]
-
-        # Dissemination venue
-        venue = st.text_input(
-            "Dissemination Venue",
-            placeholder="e.g., Nature, NIH R01, Conference Name",
-            help="Where this work is intended to be published/presented"
-        )
+        venue = st.text_input("Dissemination Venue", placeholder="e.g., Nature, NIH R01, Conference Name", help="Where this work is intended to be published/presented")
 
     with col2:
-        # Rating system selection
-        rating_system = st.radio(
-            "Rating System",
-            options=["stars", "nih"],
-            format_func=lambda x: "Star Rating (1-5)" if x == "stars" else "NIH Scale (1-9)",
-            horizontal=True
-        )
+        rating_system = st.radio("Rating System", options=["stars", "nih"], format_func=lambda x: "Star Rating (1-5)" if x == "stars" else "NIH Scale (1-9)", horizontal=True)
+        is_nih_grant = st.checkbox("NIH Grant Review Format", value=True if doc_type == "Grant Proposal" else False, help="Include separate scores for Significance, Innovation, and Approach")
 
-        # NIH grant specific options
-        is_nih_grant = st.checkbox(
-            "NIH Grant Review Format",
-            value=True if doc_type == "Grant Proposal" else False,
-            help="Include separate scores for Significance, Innovation, and Approach"
-        )
-
-    # File Upload Section
-    st.markdown("### Upload Document")
-
-    uploaded_file = st.file_uploader(
-        f"Upload {doc_type} (PDF format)",
-        type=["pdf"],
-        key="document_upload"
-    )
-
+    uploaded_file = st.file_uploader(f"Upload {doc_type} (PDF format)", type=["pdf"], key="document_upload")
     if uploaded_file:
         col1, col2 = st.columns([3, 1])
-        with col1:
-            st.success(f"✅ {uploaded_file.name} uploaded successfully")
-        with col2:
-            st.info(f"Size: {uploaded_file.size / 1024:.1f} KB")
+        with col1: st.success(f"✅ {uploaded_file.name} uploaded successfully")
+        with col2: st.info(f"Size: {uploaded_file.size / 1024:.1f} KB")
 
-    # Reviewer Configuration Section
     st.markdown('<h2 class="section-header">Reviewer Configuration</h2>', unsafe_allow_html=True)
-
-    # Reviewer configuration
     reviewer_config = {}
     for i in range(st.session_state.num_reviewers):
         with st.expander(f"Reviewer {i+1} Configuration", expanded=True):
             col1, col2 = st.columns(2)
-            with col1:
-                expertise = st.text_input(
-                    "Expertise",
-                    value=f"Scientific Expert {i+1}",
-                    key=f"expertise_{i}"
-                )
-            with col2:
-                custom_prompt = st.text_area(
-                    "Custom Instructions",
-                    value=get_default_reviewer_prompt(doc_type),
-                    height=150,
-                    key=f"prompt_{i}"
-                )
-            reviewer_config[f"reviewer_{i}"] = {
-                "expertise": expertise,
-                "prompt": custom_prompt
-            }
+            with col1: expertise = st.text_input("Expertise", value=f"Scientific Expert {i+1}", key=f"expertise_{i}")
+            with col2: custom_prompt = st.text_area("Custom Instructions", value=get_default_reviewer_prompt(doc_type), height=150, key=f"prompt_{i}")
+            reviewer_config[f"reviewer_{i}"] = {"expertise": expertise, "prompt": custom_prompt}
 
-    # Number of iterations
-    num_iterations = st.number_input(
-        "Number of Discussion Iterations",
-        min_value=1,
-        max_value=5,
-        value=default_settings['iterations'],
-        help="Number of rounds of discussion between reviewers"
-    )
+    num_iterations = st.number_input("Number of Discussion Iterations", min_value=1, max_value=5, value=default_settings['iterations'], help="Number of rounds of discussion between reviewers")
 
-    # Action buttons
     st.markdown("### Review Actions")
-
-    # Generate Review button with dependency checks
-    can_generate = uploaded_file and 'review_config' in st.session_state
-    if st.button(
-        "🚀 Generate Review",
-        key="generate_review",
-        disabled=not can_generate
-    ):
-        if not uploaded_file:
-            st.error("❌ Please upload a PDF file first.")
-        elif 'review_config' not in st.session_state:
-            st.error("❌ Please complete the configuration first.")
+    can_generate = uploaded_file
+    if st.button("🚀 Generate Review", key="generate_review", disabled=not can_generate):
+        if not uploaded_file: st.error("❌ Please upload a PDF file first.")
         else:
-            with st.spinner("📊 Processing review..."):
-                try:
-                    process_review(uploaded_file)
-                except Exception as e:
-                    st.error(f"❌ Error during review process: {str(e)}")
-                    if st.session_state.get('debug_mode', False):
-                        st.exception(e)
+            st.session_state.review_config = {
+                "document_type": doc_type, "venue": venue, "rating_system": rating_system, "is_nih_grant": is_nih_grant,
+                "reviewers": reviewer_config, "num_iterations": num_iterations, "bias": st.session_state.bias, "temperature": st.session_state.temperature
+            }
+            st.success("✅ Configuration saved successfully!")
+            with st.spinner("📊 Processing review..."): process_review(uploaded_file)
 
-    # Show review status
     if 'current_review' in st.session_state:
-        with st.expander("Current Review Status", expanded=True):
-            display_review_results(st.session_state.current_review)
+        with st.expander("Current Review Status", expanded=True): display_review_results(st.session_state.current_review)
 
 def process_review(uploaded_file):
-    """Process the review with current configuration."""
     try:
         config = st.session_state.review_config
-        
-        # Extract content from PDF
         with st.spinner("Extracting content from PDF..."):
             text_content, images, metadata = extract_pdf_content(uploaded_file)
-            
-            # Document Overview spanning full width
-            st.markdown("## Document Overview")
-            st.write(f"""
-            - **Title:** {metadata['title']}
-            - **Author:** {metadata['author']}
-            - **Type:** {config['document_type']}
-            - **Venue:** {config['venue']}
-            - **Pages:** {metadata['total_pages']}
-            - **Number of Figures:** {len(images)}
-            - **Number of Sections:** {len(metadata['sections'])}
-            """, unsafe_allow_html=True)
-            
-            # Section Analysis
-            st.markdown("### Section Structure")
-            for section in metadata['sections']:
-                with st.expander(f"📄 {section['title']}", expanded=True):
-                    st.write(f"Content length: {section['content_length']} characters")
-            
-            # Display figures if available
-            if images:
-                st.markdown("### Document Figures")
-                for idx, img in enumerate(images):
-                    st.image(
-                        img,
-                        caption=f"Figure {idx+1}",
-                        use_container_width=True
-                    )
         
-        # Create agents
+        st.markdown("## Document Overview")
+        st.write(f"""
+        - **Title:** {metadata['title']}
+        - **Author:** {metadata['author']}
+        - **Type:** {config['document_type']}
+        - **Venue:** {config['venue']}
+        - **Pages:** {metadata['total_pages']}
+        - **Figures:** {len(images)}
+        - **Sections:** {len(metadata['sections'])}
+        """, unsafe_allow_html=True)
+
+        st.markdown("### Section Structure")
+        for section in metadata['sections']:
+            with st.expander(f"📄 {section['title']}", expanded=True):
+                st.write(f"Content length: {section['content_length']} characters")
+
+        if images:
+            st.markdown("### Document Figures")
+            for idx, img in enumerate(images):
+                st.image(img, caption=f"Figure {idx+1}", use_container_width=True)
+
         with st.spinner("Initializing review agents..."):
-            agents = create_review_agents(
-                n_agents=len(config['reviewers']),
-                review_type=config['document_type'].lower(),
-                include_moderator=len(config['reviewers']) > 1
-            )
-        
-        # Process review with progress tracking
+            agents = create_review_agents(n_agents=len(config['reviewers']), review_type=config['document_type'].lower(), include_moderator=len(config['reviewers']) > 1)
+
         progress_container = st.container()
         with progress_container:
             progress_bar = st.progress(0)
             status_text = st.empty()
-            
-            def update_progress(progress, status):
-                progress_bar.progress(int(progress))
-                status_text.text(f"🔄 {status}")
-        
+            def update_progress(progress, status): progress_bar.progress(int(progress)); status_text.text(f"🔄 {status}")
             results = st.session_state.review_processor.process_review(
-                content=text_content,
-                agents=agents,
-                expertises=[r['expertise'] for r in config['reviewers'].values()],
-                custom_prompts=[r['prompt'] for r in config['reviewers'].values()],
-                review_type=config['document_type'].lower(),
-                venue=config['venue'],
-                num_iterations=config['num_iterations'],
-                progress_callback=update_progress
+                content=text_content, agents=agents, expertises=[r['expertise'] for r in config['reviewers'].values()],
+                custom_prompts=[r['prompt'] for r in config['reviewers'].values()], review_type=config['document_type'].lower(),
+                venue=config['venue'], num_iterations=config['num_iterations'], progress_callback=update_progress
             )
-        
-        # Clear progress indicators
         progress_container.empty()
-        
-        # Save results
         st.session_state.current_review = results
         results['document_metadata'] = metadata
         results['config'] = config
-        
-        # Display results
         st.success("✅ Review completed successfully!")
-        
-        # Results section
         st.markdown("## Review Results")
         display_review_results(results)
-        
-        # Download options
+
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("📥 Download Full Report", use_container_width=True):
-                report_content = generate_review_report(results)
-                st.download_button(
-                    label="Save Report",
-                    data=report_content,
-                    file_name=f"review_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md",
-                    mime="text/markdown"
-                )
-        
+            if st.button("📥 Download Report", use_container_width=True):
+                report = generate_review_report(results)
+                st.download_button("Save Report", report, f"review_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md", "text/markdown")
         with col2:
-            if st.button("📊 Export Analysis Data", use_container_width=True):
-                analysis_data = {
-                    'metadata': metadata,
-                    'analysis': results.get('analysis', {}),
-                    'scores': extract_all_scores(results)
-                }
-                st.download_button(
-                    label="Save Analysis",
-                    data=json.dumps(analysis_data, indent=2),
-                    file_name=f"analysis_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-                    mime="application/json"
-                )
-        
+            if st.button("📊 Export Analysis", use_container_width=True):
+                analysis_data = {'metadata': metadata, 'analysis': results.get('analysis', {}), 'scores': extract_all_scores(results)}
+                st.download_button("Save Analysis", json.dumps(analysis_data, indent=2), f"analysis_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json", "application/json")
     except Exception as e:
         st.error(f"❌ Error processing review: {str(e)}")
-        if st.session_state.get('debug_mode', False):
-            st.exception(e)
-        raise
+        if st.session_state.get('debug_mode', False): st.exception(e)
 
 def show_review_process_tab():
     """Display the review process interface."""
@@ -1887,7 +1758,7 @@ def main_content():
                 help="Controls randomness in model responses"
             )
             
-            # Debug mode checkbox
+            # Debug mode checkbox# Debug mode checkbox
             debug_mode = st.checkbox(
                 "Debug Mode",
                 value=st.session_state.debug_mode,
