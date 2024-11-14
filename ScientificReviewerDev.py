@@ -1416,7 +1416,7 @@ def extract_pdf_content(pdf_file) -> Tuple[str, List[Image.Image], Dict[str, Any
 
 def create_review_agents(n_agents: int, review_type: str = "paper", include_moderator: bool = False) -> List[ChatOpenAI]:
     """Create review agents including a moderator if specified."""
-    model = "gpt-4-turbo-preview"  # Using the latest GPT-4 model
+    model = "gpt-4o"  # Using the latest GPT-4 model
     
     # Create regular review agents
     agents = [
