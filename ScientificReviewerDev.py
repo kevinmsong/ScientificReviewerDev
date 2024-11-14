@@ -3,12 +3,13 @@ import logging
 from openai import OpenAI
 from langchain_openai import ChatOpenAI
 from langchain.schema import HumanMessage
-import PyPDF2
+import fitz
 import io
 from PIL import Image
 import base64
-import asyncio
-import re
+from typing import List, Dict, Any, Tuple, Union
+import tiktoken
+import time
 
 logging.basicConfig(level=logging.INFO)
 
@@ -16,10 +17,65 @@ logging.basicConfig(level=logging.INFO)
 api_key = st.secrets["openai_api_key"]
 client = OpenAI(api_key=api_key)
 
-def create_review_agents(num_agents, model="gpt-4o"):
-    return [ChatOpenAI(temperature=0.1, openai_api_key=api_key, model=model) for _ in range(num_agents)]
+def create_review_agents(num_agents: int, review_type: str = "paper", include_moderator: bool = False) -> List[ChatOpenAI]:
+    """Create review agents including a moderator if specified."""
+    # Select model based on review type
+    model = "gpt-4o"
+    
+    # Create regular review agents
+    agents = [ChatOpenAI(temperature=0.1, openai_api_key=api_key, model=model) 
+             for _ in range(num_agents)]
+    
+    # Add moderator agent if requested and multiple reviewers
+    if include_moderator and num_agents > 1:
+        moderator_agent = ChatOpenAI(temperature=0.1, openai_api_key=api_key, 
+                                   model="gpt-4o")
+        agents.append(moderator_agent)
+    
+    return agents
 
-def extract_content(response, default_value):
+def chunk_content(text: str, max_tokens: int = 6000) -> List[str]:
+    """Split content into chunks that fit within token limits."""
+    encoding = tiktoken.encoding_for_model("gpt-4o")
+    tokens = encoding.encode(text)
+    
+    if len(tokens) <= max_tokens:
+        return [text]
+    
+    chunks = []
+    current_chunk = []
+    current_length = 0
+    
+    paragraphs = text.split('\n\n')
+    
+    for paragraph in paragraphs:
+        paragraph_tokens = encoding.encode(paragraph)
+        if len(paragraph_tokens) > max_tokens:
+            sentences = paragraph.split('. ')
+            for sentence in sentences:
+                sentence_tokens = encoding.encode(sentence)
+                if current_length + len(sentence_tokens) > max_tokens:
+                    if current_chunk:
+                        chunks.append(encoding.decode(current_chunk))
+                        current_chunk = []
+                        current_length = 0
+                current_chunk.extend(sentence_tokens)
+                current_length += len(sentence_tokens)
+        else:
+            if current_length + len(paragraph_tokens) > max_tokens:
+                chunks.append(encoding.decode(current_chunk))
+                current_chunk = []
+                current_length = 0
+            current_chunk.extend(paragraph_tokens)
+            current_length += len(paragraph_tokens)
+    
+    if current_chunk:
+        chunks.append(encoding.decode(current_chunk))
+    
+    return chunks
+
+def extract_content(response: Union[str, Any], default_value: str) -> str:
+    """Extract content from various response types."""
     if isinstance(response, str):
         return response
     elif hasattr(response, 'content'):
@@ -30,327 +86,592 @@ def extract_content(response, default_value):
         logging.warning(f"Unexpected response type: {type(response)}")
         return default_value
 
-def extract_text_from_pdf(pdf_file):
-    pdf_reader = PyPDF2.PdfReader(pdf_file)
-    text = ""
-    for page in pdf_reader.pages:
-        text += page.extract_text()
-    return text
-
-# Grant Review Functions
-async def review_proposal(content, agents, expertises, review_type):
-    criteria = ["Significance", "Investigator(s)", "Innovation", "Approach", "Environment"] if review_type == "NIH" else ["Intellectual Merit", "Broader Impacts"]
-    review_log = []
-
-    for agent, expertise in zip(agents, expertises):
-        review_prompt = f"""
-        Please review, as a {expertise} for a postdoctoral scientific audience, the following {'NIH' if review_type == 'NIH' else 'NSF'} project proposal considering these main criteria:
-        
-        {"1. Significance\n2. Investigator(s)\n3. Innovation\n4. Approach\n5. Environment" if review_type == "NIH" else "1. Intellectual Merit: The potential to advance knowledge\n2. Broader Impacts: The potential to benefit society and contribute to desired societal outcomes"}
-
-        {"" if review_type == "NIH" else '''
-        For both criteria, consider:
-        a) Potential to advance knowledge/benefit society
-        b) Creativity, originality, and transformative potential
-        c) Soundness of the plan and assessment mechanism
-        d) Qualifications of the team/individual
-        e) Adequacy of resources
-        '''}
-
-        Additional review principles:
-        Focus on the highest quality and potential to advance or transform knowledge frontiers
-        Consider broader contributions to societal goals
-        Assess based on appropriate metrics, considering project size and resources
-
-        Please provide your review, addressing the following points for each criterion:
-        1. Significance of the work
-        2. Innovation in the approach
-        3. Rigor and reproducibility
-        4. Clarity of presentation
-        5. Evaluation methods
-
-        For each criterion, provide a harsh and critical review, focusing on weaknesses. Be technical, elaborate, and extremely critical in your assessment.
-
-        Highlight any specific paragraphs that need significant correction by referring to them using their starting words.
-        
-        If needed, you may use block quotes to point at specific areas that need improvement, and provide concrete suggestions for each quoted section.
-
-        End your review for each criterion with a clear numerical rating from 1 to 9 (1 being the lowest, 9 being the highest) in the following format:
-        
-        [Criterion Name] Rating: X/9
-
-        Provide a brief summary for each rating, highlighting the main weaknesses and suggesting concrete details for improvement.
-
-        Proposal content:
-        {content}
-
-        Your review:
-        """
-
-        try:
-            response = await agent.ainvoke([HumanMessage(content=review_prompt)])
-            review_text = extract_content(response, "[Error: Unable to extract response]")
-        except Exception as e:
-            logging.error(f"Error getting response: {str(e)}")
-            review_text = "[Error: Issue with review]"
-
-        review_log.append({"review": review_text, "expertise": expertise})
-        st.write(f"Review by {expertise}:\n\n{review_text}\n\n")
-
-    return review_log
-
-def extract_ratings(review_text, criteria):
-    ratings = {}
-    for criterion in criteria:
-        match = re.search(rf"{criterion} Rating:\s*(\d+)/9", review_text)
-        if match:
-            ratings[criterion] = int(match.group(1))
-        else:
-            ratings[criterion] = None
-    return ratings
-
-def calculate_lowest_ratings(review_log, criteria):
-    lowest_ratings = {criterion: 9 for criterion in criteria}
-    lowest_rationales = {criterion: "" for criterion in criteria}
-
-    for review in review_log:
-        review_text = review["review"]
-        ratings = extract_ratings(review_text, criteria)
-        
-        for criterion in criteria:
-            if ratings[criterion] is not None and ratings[criterion] < lowest_ratings[criterion]:
-                lowest_ratings[criterion] = ratings[criterion]
-                rationale_match = re.search(rf"{criterion} Rating:.*?\n(.*?)(?=\n\n|\Z)", review_text, re.DOTALL)
-                if rationale_match:
-                    lowest_rationales[criterion] = rationale_match.group(1).strip()
-
-    return lowest_ratings, lowest_rationales
-
-# Scientific Paper Review Functions
-async def review_article(content, agents, expertises):
-    review_log = []
-
-    for i, (agent, expertise) in enumerate(zip(agents, expertises)):
-        prompt = f"""
-        You are an expert in {expertise}. Please review the following abstract/article for peer-reviewed publication.
-        
-        Focus on significance, innovation, and comprehensive evaluation of approaches (rigor and reproducibility, clarity, evaluation, etc.)
-        
-        Please be technical, elaborate, and extremely critical. Make the reviews harsher, and focus on weaknesses and specific areas of the paper, section by section.
-
-        If needed, you may use block quotes to point at specific areas that need improvement, and provide concrete suggestions for each quoted section.
-
-        Content to review:
-        {content}
-
-        Please provide your review, addressing the following points:
-        1. Significance of the work
-        2. Innovation in the approach
-        3. Rigor and reproducibility
-        4. Clarity of presentation
-        5. Evaluation methods
-
-        End your review with a rating from 1 to 9 (1 being the lowest, 9 being the highest) and a brief summary.
-
-        Your review:
-        """
-
-        try:
-            response = await agent.ainvoke([HumanMessage(content=prompt)])
-            review_text = extract_content(response, f"[Error: Unable to extract response for Reviewer {i+1}]")
-        except Exception as e:
-            logging.error(f"Error getting response from Reviewer {i+1}: {str(e)}")
-            review_text = f"[Error: Issue with Reviewer {i+1}]"
-
-        review_log.append({"reviewer": expertise, "review": review_text})
-        st.write(f"Reviewer ({expertise}):\n\n{review_text}\n\n")
-
-    return review_log
-
-def calculate_average_rating(review_log):
-    ratings = []
-    for review in review_log:
-        review_text = review["review"]
-        try:
-            rating = int(review_text.split("Rating:")[-1].split("/")[0].strip())
-            ratings.append(rating)
-        except ValueError:
-            st.warning(f"Could not extract rating from {review['reviewer']}'s review.")
+def extract_pdf_content(pdf_file) -> Tuple[str, List[Image.Image]]:
+    """Extract text and images from a PDF file."""
+    pdf_document = fitz.open(stream=pdf_file.read(), filetype="pdf")
+    text_content = ""
+    images = []
     
-    if ratings:
-        average_rating = sum(ratings) / len(ratings)
-        return average_rating
+    for page in pdf_document:
+        text_content += page.get_text()
+        for img in page.get_images():
+            xref = img[0]
+            base_image = pdf_document.extract_image(xref)
+            image_bytes = base_image["image"]
+            image = Image.open(io.BytesIO(image_bytes))
+            images.append(image)
+    
+    return text_content, images
+
+def get_debate_prompt(expertise: str, iteration: int, previous_reviews: List[Dict[str, str]], topic: str) -> str:
+    """Generate a debate-style prompt for reviewers to respond to previous reviews."""
+    prompt = f"""As an expert in {expertise}, you are participating in iteration {iteration} of a scientific review discussion.
+
+Previous reviews and comments to consider:
+
+"""
+    for prev_review in previous_reviews:
+        prompt += f"\nReview by {prev_review['expertise']}:\n{prev_review['review']}\n"
+        
+    if iteration == 1:
+        prompt += f"""
+Please provide your initial review of this {topic} with:
+1. Overview and Summary
+2. Technical Analysis
+3. Methodology Assessment
+4. Strengths
+5. Weaknesses
+6. Suggestions for Improvement
+7. Scores (1-9)
+"""
     else:
-        return None
+        prompt += f"""
+Based on the previous reviews, please:
+1. Address points raised by other reviewers
+2. Defend or revise your previous assessments
+3. Identify areas of agreement and disagreement
+4. Provide additional insights or counterpoints
+5. Update your scores if necessary
 
-def get_editorial_decision(average_rating):
-    if average_rating is None:
-        return "Unable to determine"
-    elif average_rating >= 7:
-        return "Accept"
-    elif 5 <= average_rating < 7:
-        return "Minor Revision"
-    elif 3 <= average_rating < 5:
-        return "Major Revision"
-    else:
-        return "Reject"
-
-# Scientific Poster Review Functions
-async def analyze_poster(image_base64, agent):
-    prompt = """
-    This is a scientific poster. What is the problem/challenge being addressed by this project?
+Focus on building a constructive dialogue and improving the quality of the review.
+"""
     
-    How is this project innovative? What methods does it use to address the problem/challenge?
+    return prompt
+
+def process_chunks_with_debate(chunks: List[str], agent: ChatOpenAI, expertise: str, 
+                             prompt: str, iteration: int) -> str:
+    """Process multiple chunks of content for a single review iteration."""
+    chunk_reviews = []
     
-    Can you evaluate the scientific rigor of the poster? Are its results meaningful?
+    for i, chunk in enumerate(chunks):
+        chunk_prompt = f"""Reviewing part {i+1} of {len(chunks)}:
+
+{prompt}
+
+Content part {i+1}/{len(chunks)}:
+{chunk}"""
+
+        try:
+            response = agent.invoke([HumanMessage(content=chunk_prompt)])
+            chunk_review = extract_content(response, f"[Error processing chunk {i+1}]")
+            chunk_reviews.append(chunk_review)
+        except Exception as e:
+            logging.error(f"Error processing chunk {i+1} for {expertise}: {str(e)}")
+            chunk_reviews.append(f"[Error in chunk {i+1}]")
     
-    How are the results benchmarked? Please be technical, elaborate, and extremely harsh and critical in your review, and suggest concrete improvements, section by section, figure by figure, of the poster.
+    if len(chunks) > 1:
+        compilation_prompt = f"""Please compile your reviews of all {len(chunks)} parts into a single coherent review.
 
-    If needed, you may use block quotes to point at specific areas that need improvement, and provide concrete suggestions for each quoted section.
+Previous chunk reviews:
+{''.join(chunk_reviews)}
 
-    Please outline your generated report with concrete details critiquing each section of the poster.
+Please provide a consolidated review addressing all sections of the document."""
 
-    End your review with a rating from 1 to 9 (1 being the lowest, 9 being the highest) and a brief summary.
-    """
+        try:
+            compilation_response = agent.invoke([HumanMessage(content=compilation_prompt)])
+            return extract_content(compilation_response, "[Error compiling final review]")
+        except Exception as e:
+            logging.error(f"Error compiling review for {expertise}: {str(e)}")
+            return "\n\n".join(chunk_reviews)
+    
+    return chunk_reviews[0]
 
+def process_reviews_with_debate(content: str, agents: List[ChatOpenAI], expertises: List[str], 
+                              custom_prompts: List[str], review_type: str, 
+                              num_iterations: int, progress_callback=None) -> Dict[str, Any]:
+    """Process reviews with multiple iterations of debate between reviewers with real-time updates."""
+    # Create containers for real-time display
+    review_containers = {}
+    iteration_containers = []
+    
+    # Initialize containers for each iteration
+    for iteration in range(num_iterations):
+        iteration_header = st.subheader(f"Iteration {iteration + 1}")
+        iteration_container = st.container()
+        iteration_containers.append({
+            "header": iteration_header,
+            "container": iteration_container
+        })
+        
+        # Initialize containers for each reviewer in this iteration
+        for expertise in expertises:
+            if expertise not in review_containers:
+                review_containers[expertise] = []
+            with iteration_container:
+                reviewer_container = st.empty()
+                review_containers[expertise].append(reviewer_container)
+    
+    # Initialize moderator container if needed
+    if len(agents) > len(expertises):
+        moderator_container = st.container()
+        moderator_header = moderator_container.subheader("Moderator Analysis")
+        moderator_content = moderator_container.empty()
+    
+    # Chunk the content
+    content_chunks = chunk_content(content)
+    all_iterations = []
+    latest_reviews = []
+    
+    # For each iteration
+    for iteration in range(num_iterations):
+        review_results = []
+        
+        # Update progress if callback provided
+        if progress_callback:
+            progress = (iteration / num_iterations) * 100
+            progress_callback(progress, f"Processing iteration {iteration + 1}/{num_iterations}")
+        
+        # Get reviews from each agent
+        for i, (agent, expertise, base_prompt) in enumerate(zip(agents[:-1], expertises, custom_prompts)):
+            try:
+                debate_prompt = get_debate_prompt(expertise, iteration + 1, latest_reviews, review_type)
+                full_prompt = f"{base_prompt}\n\n{debate_prompt}"
+                
+                # Show "Generating..." placeholder
+                review_containers[expertise][iteration].markdown("🔄 Generating review...")
+                
+                # Process chunks for this review
+                review_text = process_chunks_with_debate(
+                    content_chunks, agent, expertise, full_prompt, iteration + 1
+                )
+                
+                # Update review display in real-time
+                with review_containers[expertise][iteration].container():
+                    st.write(f"Review by {expertise}")
+                    sections = review_text.split('\n\n')
+                    for section in sections:
+                        st.markdown(section.strip())
+                        st.markdown("---")
+                
+                review_result = {
+                    "expertise": expertise,
+                    "review": review_text,
+                    "iteration": iteration + 1,
+                    "success": True
+                }
+                
+                review_results.append(review_result)
+                
+            except Exception as e:
+                logging.error(f"Error in review process for {expertise}: {str(e)}")
+                error_message = f"An error occurred while processing review from {expertise}. Error: {str(e)}"
+                review_containers[expertise][iteration].error(error_message)
+                
+                review_results.append({
+                    "expertise": expertise,
+                    "review": error_message,
+                    "iteration": iteration + 1,
+                    "success": False
+                })
+        
+        all_iterations.append(review_results)
+        latest_reviews = review_results
+    
+    # After all iterations, have moderator analyze the complete discussion
+    moderation_result = None
+    if len(agents) > len(expertises):
+        try:
+            moderator_content.markdown("🔄 Generating moderator analysis...")
+            
+            moderator_prompt = """As a senior scientific moderator, analyze the complete review discussion:
+
+"""
+            for iteration_idx, iteration_reviews in enumerate(all_iterations, 1):
+                moderator_prompt += f"\nIteration {iteration_idx}:\n"
+                for review in iteration_reviews:
+                    if review.get("success", False):
+                        moderator_prompt += f"\nReview by {review['expertise']}:\n{review['review']}\n"
+            
+            moderator_prompt += """
+Please provide a comprehensive analysis including:
+
+1. DISCUSSION EVOLUTION
+- How did viewpoints evolve across iterations
+- Key points of convergence and divergence
+- Quality and depth of the scientific discourse
+
+2. REVIEW ANALYSIS
+- Scientific rigor of each reviewer's contributions
+- Strength of arguments and supporting evidence
+- Constructiveness of the debate
+
+3. SYNTHESIS OF KEY POINTS
+- Areas of consensus
+- Unresolved disagreements
+- Most compelling arguments
+- Critical insights gained through discussion
+
+4. FINAL ASSESSMENT
+- Overall score (1-9): [Score]
+- Key strengths: [List 3-5 main strengths]
+- Key weaknesses: [List 3-5 main weaknesses]
+- Priority improvements: [List 3-5 main suggestions]
+- Final recommendation: [Accept/Major Revision/Minor Revision/Reject]
+
+Please provide specific examples from the discussion to support your analysis."""
+
+            try:
+                moderator_response = agents[-1].invoke([HumanMessage(content=moderator_prompt)])
+                moderation_result = extract_content(moderator_response, "[Error: Unable to extract moderator response]")
+                
+                # Update moderator analysis in real-time
+                with moderator_content.container():
+                    sections = moderation_result.split('\n\n')
+                    for section in sections:
+                        st.markdown(section.strip())
+                        st.markdown("---")
+                
+            except Exception as mod_error:
+                logging.error(f"Moderator API Error: {str(mod_error)}")
+                moderation_result = "Error occurred during moderation. Please try again."
+                moderator_content.error(moderation_result)
+            
+        except Exception as e:
+            logging.error(f"Error in moderation process: {str(e)}")
+            moderation_result = f"An error occurred during moderation. Error: {str(e)}"
+            moderator_content.error(moderation_result)
+    
+    return {
+        "all_iterations": all_iterations,
+        "moderation": moderation_result
+    }
+
+def display_review_results_with_debate(results: Dict[str, Any]) -> None:
+    """Display results from iterative review process."""
     try:
-        response = await agent.ainvoke([HumanMessage(content=[
-            {"type": "text", "text": prompt},
-            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}}
-        ])])
-        analysis = extract_content(response, "[Error: Unable to extract response for poster analysis]")
-    except Exception as e:
-        logging.error(f"Error getting response for poster analysis: {str(e)}")
-        analysis = f"[Error: Issue with poster analysis: {str(e)}]"
-
-    return analysis
-
-# Main Application
-def main():
-    st.title("Scientific Reviewer Application")
-    
-    # Add version number to sidebar
-    st.sidebar.text("Version 1.1.0")
-    
-    # Navigation
-    page = st.sidebar.selectbox("Choose a review type", ["Grant Proposal Review", "Scientific Paper Review", "Scientific Poster Review"])
-    
-    if page == "Grant Proposal Review":
-        grant_review_page()
-    elif page == "Scientific Paper Review":
-        scientific_paper_review_page()
-    elif page == "Scientific Poster Review":
-        scientific_poster_review_page()
-
-def grant_review_page():
-    st.header("Grant Proposal Review")
-    
-    uploaded_file = st.file_uploader("Upload your project proposal (PDF)", type="pdf")
-
-    if uploaded_file is not None:
-        content = extract_text_from_pdf(uploaded_file)
-
-        review_type = st.radio("Select review type:", ("NIH Proposal", "NSF Proposal"))
+        # Display iterations
+        for iteration_idx, iteration_reviews in enumerate(results["all_iterations"], 1):
+            st.subheader(f"Iteration {iteration_idx}")
+            for review in iteration_reviews:
+                with st.expander(f"Review by {review['expertise']}", expanded=True):
+                    if review.get("success", False):
+                        sections = review['review'].split('\n\n')
+                        for section in sections:
+                            st.write(section.strip())
+                            st.markdown("---")
+                    else:
+                        st.error(review['review'])
         
-        num_agents = st.number_input("Enter the number of reviewer agents:", min_value=1, max_value=5, value=3)
-        
-        expertises = []
-        for i in range(num_agents):
-            expertise = st.text_input(f"Enter expertise for agent {i+1}:", f"Scientific Expert {i+1}")
-            expertises.append(expertise)
-
-        if st.button("Start Review"):
-            st.write("Starting the review process...")
-
-            agents = create_review_agents(num_agents)
-            
-            if review_type == "NIH Proposal":
-                review_log = asyncio.run(review_proposal(content, agents, expertises, "NIH"))
-                criteria = ["Significance", "Investigator(s)", "Innovation", "Approach", "Environment"]
-            else:  # NSF Proposal
-                review_log = asyncio.run(review_proposal(content, agents, expertises, "NSF"))
-                criteria = ["Intellectual Merit", "Broader Impacts"]
-
-            lowest_ratings, lowest_rationales = calculate_lowest_ratings(review_log, criteria)
-
-            st.write("\nLowest Ratings and Rationales:")
-            for criterion in criteria:
-                st.write(f"{criterion}: {lowest_ratings[criterion]}/9")
-                st.write(f"Rationale: {lowest_rationales[criterion]}\n")
-
-            st.write("Review process completed.")
-
-def scientific_paper_review_page():
-    st.header("Scientific Paper Review")
-
-    input_method = st.radio("Choose input method:", ("Paste Abstract", "Paste Full Text", "Upload PDF"))
-
-    content = ""
-    if input_method == "Paste Abstract":
-        content = st.text_area("Paste the abstract here:", height=300)
-    elif input_method == "Paste Full Text":
-        content = st.text_area("Paste the full text of your paper here:", height=500)
-    else:
-        uploaded_file = st.file_uploader("Choose a PDF file", type="pdf")
-        if uploaded_file is not None:
-            content = extract_text_from_pdf(uploaded_file)
-
-    num_agents = st.number_input("Enter the number of reviewer agents:", min_value=1, max_value=5, value=3)
-    
-    expertises = []
-    for i in range(num_agents):
-        expertise = st.text_input(f"Enter expertise for agent {i+1}:", f"Scientific Expert {i+1}")
-        expertises.append(expertise)
-
-    if st.button("Start Review"):
-        if content:
-            st.write("Starting peer review process...")
-            
-            agents = create_review_agents(num_agents)
-            
-            review_log = asyncio.run(review_article(content, agents, expertises))
-
-            average_rating = calculate_average_rating(review_log)
-            if average_rating:
-                st.write(f"\nAverage Rating: {average_rating:.2f}")
-                decision = get_editorial_decision(average_rating)
-                st.write(f"Recommended Editorial Decision: {decision}")
+        # Display final moderation
+        if results["moderation"]:
+            st.subheader("Final Moderator Analysis")
+            if not results["moderation"].startswith("[Error"):
+                sections = results["moderation"].split('\n\n')
+                for section in sections:
+                    st.write(section.strip())
+                    st.markdown("---")
             else:
-                st.write("Unable to calculate average rating.")
+                st.error(results["moderation"])
+    
+    except Exception as e:
+        st.error(f"Error displaying results: {str(e)}")
+        logging.exception("Error in display_review_results_with_debate:")
 
-            st.write("Peer review process completed.")
-        else:
-            st.warning("Please provide content for review (either paste an abstract, full text, or upload a PDF).")
+def scientific_review_page():
+    st.header("Multi-Agent Scientific Review System")
+    
+    # Add session state for storing reviewer configurations
+    if 'expertises' not in st.session_state:
+        st.session_state.expertises = []
+    if 'custom_prompts' not in st.session_state:
+        st.session_state.custom_prompts = []
+    
+    # Review type selection
+    review_type = st.selectbox(
+        "Select Review Type",
+        ["Paper", "Grant", "Poster"]
+    )
+    
+    # Number of reviewers with validation
+    num_reviewers = st.number_input(
+        "Number of Reviewers",
+        min_value=1,
+        max_value=10,
+        value=2,
+        key="num_reviewers"
+    )
+    
+    # Number of iterations with validation
+    num_iterations = st.number_input(
+        "Number of Discussion Iterations",
+        min_value=1,
+        max_value=10,
+        value=2,
+        help="Number of rounds of discussion between reviewers",
+        key="num_iterations"
+    )
+    
+    # Option for moderator when multiple reviewers
+    use_moderator = False
+    if num_reviewers > 1:
+        use_moderator = st.checkbox(
+            "Include Moderator/Judge Review", 
+            value=True,
+            key="use_moderator"
+        )
+    
+    # Collect expertise and custom prompts for each reviewer
+    expertises = []
+    custom_prompts = []
+    
+    with st.expander("Configure Reviewers"):
+        for i in range(num_reviewers):
+            col1, col2 = st.columns(2)
+            
+            # Expertise input with unique key
+            with col1:
+                expertise = st.text_input(
+                    f"Expertise for Reviewer {i+1}", 
+                    value=f"Scientific Expert {i+1}",
+                    key=f"expertise_{i}"
+                )
+                expertises.append(expertise)
+            
+            # Custom prompt input with unique key
+            with col2:
+                default_prompt = get_default_prompt(review_type, expertise)
+                prompt = st.text_area(
+                    f"Custom Prompt for Reviewer {i+1}",
+                    value=default_prompt,
+                    height=200,
+                    key=f"prompt_{i}"
+                )
+                custom_prompts.append(prompt)
+    
+    # File upload with validation
+    uploaded_file = st.file_uploader(
+        f"Upload {review_type} (PDF)",
+        type=["pdf"],
+        key="uploaded_file"
+    )
+    
+    # Start review button with validation
+    start_review = st.button(
+        "Start Review",
+        disabled=not uploaded_file,  # Disable if no file uploaded
+        key="start_review"
+    )
+    
+    if uploaded_file and start_review:
+        try:
+            # Create a progress bar
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            def update_progress(progress, status):
+                progress_bar.progress(int(progress))
+                status_text.text(status)
+            
+            # Extract content
+            update_progress(10, "Extracting content from PDF...")
+            content = extract_pdf_content(uploaded_file)[0]
+            
+            # Create agents
+            update_progress(20, "Initializing review agents...")
+            agents = create_review_agents(num_reviewers, review_type.lower(), use_moderator)
+            
+            # Validate inputs
+            if not all(expertises) or not all(custom_prompts):
+                st.error("Please ensure all reviewer configurations are complete.")
+                return
+            
+            # Process reviews with real-time updates
+            update_progress(30, "Starting review process...")
+            results = process_reviews_with_debate(
+                content=content,
+                agents=agents,
+                expertises=expertises,
+                custom_prompts=custom_prompts,
+                review_type=review_type.lower(),
+                num_iterations=num_iterations,
+                progress_callback=update_progress
+            )
+            
+            update_progress(100, "Review process completed!")
+            
+            # Clear progress indicators
+            time.sleep(1)  # Brief pause to show completion
+            progress_bar.empty()
+            status_text.empty()
+            
+            st.success("Review process completed successfully!")
+            
+        except Exception as e:
+            st.error(f"An error occurred during the review process: {str(e)}")
+            logging.exception("Error in review process:")
+            
+            if st.sidebar.checkbox("Debug Mode", value=False):
+                st.exception(e)
+            
+            st.warning("Please try again or check your inputs.")
 
-def scientific_poster_review_page():
-    st.header("Scientific Poster Review")
+def get_default_prompt(review_type: str, expertise: str) -> str:
+    """Get default prompt based on review type."""
+    try:
+        prompts = {
+            "Paper": f"""As an expert in {expertise}, please review this scientific paper considering:
+                
+Strengths and Weaknesses
 
-    uploaded_file = st.file_uploader("Upload your poster (PDF or Image)", type=["pdf", "png", "jpg", "jpeg"])
+1. Scientific Merit and Novelty
+2. Methodology and Technical Rigor
+3. Data Analysis and Interpretation
+4. Clarity and Presentation
+5. Impact and Significance
 
-    if uploaded_file is not None and st.button("Start Analysis"):
-        st.write("Starting poster analysis process...")
+Please provide scores (1-9) for each aspect and an overall score.""",
+            
+            "Grant": f"""As an expert in {expertise}, please evaluate this grant proposal considering:
+                
+Strengths and Weaknesses
+
+1. Innovation and Significance
+2. Approach and Methodology
+3. Feasibility and Timeline
+4. Budget Justification
+5. Expected Impact
+
+Please provide scores (1-9) for each aspect and an overall score.""",
+            
+            "Poster": f"""As an expert in {expertise}, please review this scientific poster considering:
+                
+Strengths and Weaknesses
+
+1. Visual Appeal and Organization
+2. Scientific Content
+3. Methodology Presentation
+4. Results and Conclusions
+5. Impact and Relevance
+
+Please provide scores (1-9) for each aspect and an overall score."""
+        }
+        return prompts.get(review_type, f"Please provide a thorough review of this {review_type.lower()}.")
+    except Exception as e:
+        logging.error(f"Error generating default prompt: {str(e)}")
+        return "Please provide a thorough review of this submission."
+
+def main():
+    st.set_page_config(
+        page_title="Multi-Agent Scientific Review System",
+        page_icon="📝",
+        layout="wide",
+        initial_sidebar_state="expanded"
+    )
+    
+    # Add custom CSS
+    st.markdown("""
+        <style>
+        .stButton>button {
+            width: 100%;
+            margin-top: 1rem;
+        }
+        .stExpander {
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin-bottom: 1rem;
+        }
+        .streamlit-expanderHeader {
+            background-color: #f8f9fa;
+        }
+        .stTextArea>div>div>textarea {
+            font-family: monospace;
+        }
+        .review-section {
+            margin: 1rem 0;
+            padding: 1rem;
+            border-left: 3px solid #4CAF50;
+            background-color: #f8f9fa;
+        }
+        .review-header {
+            font-weight: bold;
+            color: #2C3E50;
+            margin-bottom: 0.5rem;
+        }
+        .iteration-header {
+            background-color: #2C3E50;
+            color: white;
+            padding: 0.5rem;
+            border-radius: 4px;
+            margin: 1rem 0;
+        }
+        .review-score {
+            font-weight: bold;
+            color: #E74C3C;
+        }
+        .moderator-analysis {
+            background-color: #ECF0F1;
+            padding: 1rem;
+            border-radius: 4px;
+            margin-top: 1rem;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+    
+    # Add version number and info to sidebar
+    st.sidebar.text("Version 2.0.0")
+    
+    # Model information in sidebar
+    st.sidebar.markdown("### Model Information")
+    st.sidebar.markdown("- Reviewer Agent Model: GPT-4o")
+    st.sidebar.markdown("- Moderator Model: GPT-4o")
+    
+    # Additional settings in sidebar
+    with st.sidebar.expander("Advanced Settings"):
+        st.slider(
+            "Model Temperature",
+            min_value=0.0,
+            max_value=1.0,
+            value=0.1,
+            step=0.1,
+            help="Controls randomness in model responses"
+        )
+        st.number_input(
+            "Maximum Tokens per Chunk",
+            min_value=1000,
+            max_value=6000,
+            value=4000,
+            step=500,
+            help="Maximum tokens per content chunk"
+        )
+        st.checkbox(
+            "Debug Mode",
+            value=False,
+            help="Show detailed logging information"
+        )
+    
+    # Instructions/About section in sidebar
+    with st.sidebar.expander("Instructions"):
+        st.markdown("""
+        1. Select review type (Paper/Grant/Poster)
+        2. Set number of reviewers (1-10)
+        3. Choose number of discussion iterations
+        4. Configure reviewer expertise and prompts
+        5. Upload document (PDF)
+        6. Click 'Start Review' to begin
         
-        agent = create_review_agents(1)[0]
-        
-        if uploaded_file.type == "application/pdf":
-            # Convert PDF to image (this is a simplification, you may need to use a library like pdf2image for better results)
-            image = Image.open(uploaded_file)
-        else:
-            image = Image.open(uploaded_file)
+        The system will:
+        - Process document in chunks if needed
+        - Generate reviews from each expert
+        - Facilitate discussion across iterations
+        - Provide final moderation analysis
+        """)
+    
+    scientific_review_page()
 
-        # Convert image to base64
-        buffered = io.BytesIO()
-        image.save(buffered, format="JPEG")
-        img_str = base64.b64encode(buffered.getvalue()).decode()
-        
-        analysis_result = asyncio.run(analyze_poster(img_str, agent))
-
-        st.write("Analysis Result:")
-        st.write(analysis_result)
-
-        st.write("Poster analysis completed.")
-    else:
-        st.info("Please upload a poster (either PDF or image) and click 'Start Analysis'.")
+def error_handler(func):
+    """Decorator for handling errors in functions."""
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            st.error(f"An error occurred: {str(e)}")
+            logging.exception(f"Error in {func.__name__}:")
+            return None
+    return wrapper
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        st.error(f"An unexpected error occurred: {str(e)}")
+        logging.exception("Unexpected error in main application:")
