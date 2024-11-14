@@ -26,6 +26,73 @@ api_key = st.secrets["openai_api_key"]
 client = OpenAI(api_key=api_key)
 DEFAULT_MODEL = "gpt-4o"
 
+class ReviewPersistenceManager:
+    def __init__(self, storage_dir: str = "data/reviews"):
+        """Initialize the review persistence manager."""
+        self.storage_dir = storage_dir
+        self._ensure_storage_exists()
+    
+    def _ensure_storage_exists(self):
+        """Create storage directories if they don't exist."""
+        if not os.path.exists(self.storage_dir):
+            os.makedirs(self.storage_dir)
+    
+    def _get_review_path(self, review_id: str) -> str:
+        """Get the file path for a specific review."""
+        return os.path.join(self.storage_dir, f"review_{review_id}.json")
+    
+    def save_review_session(self, review_data: Dict[str, Any]) -> Optional[str]:
+        """Save a complete review session including all iterations and moderator feedback."""
+        try:
+            review_id = str(uuid.uuid4())
+            review_data['review_id'] = review_id
+            review_data['created_at'] = datetime.now().isoformat()
+            
+            file_path = self._get_review_path(review_id)
+            with open(file_path, 'w') as f:
+                json.dump(review_data, f, indent=2)
+            
+            return review_id
+        except Exception as e:
+            logging.error(f"Error saving review session: {e}")
+            return None
+    
+    def get_review_session(self, review_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieve a complete review session by ID."""
+        try:
+            file_path = self._get_review_path(review_id)
+            if os.path.exists(file_path):
+                with open(file_path, 'r') as f:
+                    return json.load(f)
+            return None
+        except Exception as e:
+            logging.error(f"Error retrieving review session: {e}")
+            return None
+    
+    def get_all_reviews(self, limit: int = None, offset: int = 0) -> List[Dict[str, Any]]:
+        """Retrieve all review sessions with optional pagination."""
+        try:
+            reviews = []
+            files = os.listdir(self.storage_dir)
+            review_files = [f for f in files if f.startswith('review_')]
+            
+            # Sort by creation time (newest first)
+            review_files.sort(key=lambda x: os.path.getctime(
+                os.path.join(self.storage_dir, x)), reverse=True)
+            
+            if limit is not None:
+                review_files = review_files[offset:offset + limit]
+            
+            for file_name in review_files:
+                with open(os.path.join(self.storage_dir, file_name), 'r') as f:
+                    review = json.load(f)
+                    reviews.append(review)
+            
+            return reviews
+        except Exception as e:
+            logging.error(f"Error retrieving all reviews: {e}")
+            return []
+
 class EnhancedReviewContext:
     def __init__(self, storage_dir: str = "data/reviews"):
         """Initialize enhanced review context manager with comprehensive history."""
@@ -570,6 +637,18 @@ def initialize_review_settings():
         "Poster": {"reviewers": 1, "iterations": 1, "rating": "stars"}
     }
 
+def init_app_state():
+    """Initialize the application state with required managers."""
+    if 'initialized' not in st.session_state:
+        try:
+            st.session_state.persistence_manager = ReviewPersistenceManager()
+            st.session_state.context_manager = EnhancedReviewContext()
+            st.session_state.review_processor = ReviewProcessor(st.session_state.context_manager)
+            st.session_state.initialized = True
+        except Exception as e:
+            st.error(f"Error initializing application state: {e}")
+            raise
+
 def main():
     st.set_page_config(
         page_title="Multi-Agent Scientific Review System",
@@ -578,6 +657,8 @@ def main():
         initial_sidebar_state="expanded"
     )
     
+    init_app_state()
+
     # Initialize context manager
     if 'context_manager' not in st.session_state:
         st.session_state.context_manager = EnhancedReviewContext()
