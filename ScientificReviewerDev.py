@@ -1775,7 +1775,7 @@ def main():
                     # Process review
                     process_review(uploaded_file)
                     
-                except Exception as e:except Exception as e:
+                except Exception as e:
                     st.error(f"Error during review process: {str(e)}")
                     if debug_mode:
                         st.exception(e)
