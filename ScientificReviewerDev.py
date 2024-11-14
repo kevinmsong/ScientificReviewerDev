@@ -1926,7 +1926,7 @@ def main_content():
                 help="Controls randomness in model responses"
             )
             
-            st.session_state.debug_mode = st.checkbox(st.session_state.debug_mode = st.checkbox(
+            st.session_state.debug_mode = st.checkbox(
                 "Debug Mode",
                 value=st.session_state.debug_mode,
                 help="Show detailed logging information"
