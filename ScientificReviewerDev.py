@@ -1031,7 +1031,7 @@ def show_configuration_tab():
         help="Number of rounds of discussion between reviewers"
     )
     
-    # Save configuration
+    # Save configuration button
     if st.button("Save Configuration"):
         st.session_state.review_config = {
             "document_type": doc_type,
@@ -1040,7 +1040,8 @@ def show_configuration_tab():
             "is_nih_grant": is_nih_grant,
             "reviewers": reviewer_config,
             "num_iterations": num_iterations,
-            "bias": bias
+            "bias": st.session_state.bias,
+            "temperature": st.session_state.temperature
         }
         st.success("Configuration saved successfully!")
 
@@ -1535,8 +1536,22 @@ def extract_scores_from_review(review_text: str) -> Dict[str, Union[float, str]]
     
     return scores
 
+def initialize_session_state():
+    """Initialize session state variables with default values."""
+    if 'bias' not in st.session_state:
+        st.session_state.bias = 0
+    if 'temperature' not in st.session_state:
+        st.session_state.temperature = 0.1
+    if 'debug_mode' not in st.session_state:
+        st.session_state.debug_mode = False
+    if 'num_reviewers' not in st.session_state:
+        st.session_state.num_reviewers = 4
+
 def main_content():
     """Main application content."""
+    # Initialize session state
+    initialize_session_state()
+    
     # Initialize application state
     init_app_state()
     
@@ -1547,11 +1562,11 @@ def main_content():
         st.header("Review Configuration")
         
         # Reviewer bias slider
-        bias = st.slider(
+        st.session_state.bias = st.slider(
             "Reviewer Bias",
             min_value=-2,
             max_value=2,
-            value=0,
+            value=st.session_state.bias,
             help="""
             -2: Extremely negative and biased
             -1: Somewhat negative and biased
@@ -1567,18 +1582,18 @@ def main_content():
         
         # Advanced settings
         with st.expander("Advanced Settings", expanded=False):
-            temperature = st.slider(
+            st.session_state.temperature = st.slider(
                 "Model Temperature",
                 min_value=0.0,
                 max_value=1.0,
-                value=0.1,
+                value=st.session_state.temperature,
                 step=0.1,
                 help="Controls randomness in model responses"
             )
             
-            debug_mode = st.checkbox(
+            st.session_state.debug_mode = st.checkbox(
                 "Debug Mode",
-                value=False,
+                value=st.session_state.debug_mode,
                 help="Show detailed logging information"
             )
     
