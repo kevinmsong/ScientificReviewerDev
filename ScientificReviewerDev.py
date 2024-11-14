@@ -946,12 +946,12 @@ def show_configuration_tab():
     """Display the configuration interface."""
     # Document Configuration Section
     st.markdown('<h2 class="section-header">Document Configuration</h2>', unsafe_allow_html=True)
-    
+
     # Initialize default settings
     review_defaults = initialize_review_settings()
-    
+
     col1, col2 = st.columns(2)
-    
+
     with col1:
         # Document type selection
         doc_type = st.selectbox(
@@ -959,17 +959,17 @@ def show_configuration_tab():
             options=list(review_defaults.keys()),
             key="doc_type"
         )
-        
+
         # Set default values based on document type
         default_settings = review_defaults[doc_type]
-        
+
         # Dissemination venue
         venue = st.text_input(
             "Dissemination Venue",
             placeholder="e.g., Nature, NIH R01, Conference Name",
             help="Where this work is intended to be published/presented"
         )
-    
+
     with col2:
         # Rating system selection
         rating_system = st.radio(
@@ -978,37 +978,37 @@ def show_configuration_tab():
             format_func=lambda x: "Star Rating (1-5)" if x == "stars" else "NIH Scale (1-9)",
             horizontal=True
         )
-        
+
         # NIH grant specific options
         is_nih_grant = st.checkbox(
             "NIH Grant Review Format",
             value=True if doc_type == "Grant Proposal" else False,
             help="Include separate scores for Significance, Innovation, and Approach"
         )
-    
+
     # File Upload Section
     st.markdown("### Upload Document")
-    
+
     uploaded_file = st.file_uploader(
         f"Upload {doc_type} (PDF format)",
         type=["pdf"],
         key="document_upload"
     )
-    
+
     if uploaded_file:
         col1, col2 = st.columns([3, 1])
         with col1:
             st.success(f"✅ {uploaded_file.name} uploaded successfully")
         with col2:
             st.info(f"Size: {uploaded_file.size / 1024:.1f} KB")
-    
+
     # Reviewer Configuration Section
     st.markdown('<h2 class="section-header">Reviewer Configuration</h2>', unsafe_allow_html=True)
-    
+
     # Initialize reviewer state
     if 'num_reviewers' not in st.session_state:
         st.session_state.num_reviewers = default_settings['reviewers']
-    
+
     # Add/remove reviewer buttons
     col1, col2 = st.columns([1, 4])
     with col1:
@@ -1016,7 +1016,7 @@ def show_configuration_tab():
             st.session_state.num_reviewers += 1
         if st.button("➖ Remove", key="remove_reviewer") and st.session_state.num_reviewers > 1:
             st.session_state.num_reviewers -= 1
-    
+
     # Reviewer configuration
     reviewer_config = {}
     for i in range(st.session_state.num_reviewers):
@@ -1039,7 +1039,7 @@ def show_configuration_tab():
                 "expertise": expertise,
                 "prompt": custom_prompt
             }
-    
+
     # Number of iterations
     num_iterations = st.number_input(
         "Number of Discussion Iterations",
@@ -1048,10 +1048,10 @@ def show_configuration_tab():
         value=default_settings['iterations'],
         help="Number of rounds of discussion between reviewers"
     )
-    
+
     # Action buttons
     st.markdown("### Review Actions")
-    
+
     col1, col2 = st.columns(2)
     with col1:
         if st.button("💾 Save Configuration", key="save_config", use_container_width=True):
@@ -1066,14 +1066,12 @@ def show_configuration_tab():
                 "temperature": st.session_state.temperature
             }
             st.success("✅ Configuration saved successfully!")
-    
+
     with col2:
         # Generate review button with dependency checks
         can_generate = uploaded_file and 'review_config' in st.session_state
-        button_label = "🚀 Generate Review" if can_generate else "Upload PDF and Save Config First"
-        
         if st.button(
-            button_label,
+            "🚀 Generate Review",
             key="generate_review",
             disabled=not can_generate,
             use_container_width=True
