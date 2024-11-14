@@ -1,7 +1,7 @@
 import streamlit as st
 
 # Must be the first Streamlit command
-st.set_page_config(
+st.set_page_config(st.set_page_config(
     page_title="Multi-Agent Scientific Review System",
     page_icon="📝",
     layout="wide",
@@ -23,7 +23,7 @@ import json
 import os
 from datetime import datetime
 import uuid
-import reimport re
+import re
 import numpy as np
 from collections import defaultdict
 
