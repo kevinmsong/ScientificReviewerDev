@@ -1105,45 +1105,42 @@ def process_review(uploaded_file):
         with st.spinner("Extracting content from PDF..."):
             text_content, images, metadata = extract_pdf_content(uploaded_file)
             
-            # Display document overview in main area
+            # Document Overview spanning full width
             st.markdown("## Document Overview")
             
-            # Document metadata
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Pages", metadata['total_pages'])
-            with col2:
-                st.metric("Figures", len(images))
-            with col3:
-                st.metric("Sections", len(metadata['sections']))
-            
-            # Document details
+            # Use a single column for full width content
             st.markdown("### Document Information")
             st.markdown(f"""
             - **Title:** {metadata['title']}
             - **Author:** {metadata['author']}
-            - **Venue:** {config['venue']}
             - **Type:** {config['document_type']}
+            - **Venue:** {config['venue']}
+            - **Pages:** {metadata['total_pages']}
+            - **Number of Figures:** {len(images)}
+            - **Number of Sections:** {len(metadata['sections'])}
             """)
             
-            # Section overview
-            st.markdown("### Section Analysis")
+            # Section Analysis
+            st.markdown("### Section Structure")
             for section in metadata['sections']:
-                with st.expander(f"📄 {section['title']}", expanded=False):
+                with st.expander(f"📄 {section['title']}", expanded=True):
                     st.write(f"Content length: {section['content_length']} characters")
             
             # Display figures if available
             if images:
-                st.markdown("### Figures")
-                cols = st.columns(min(len(images), 3))
-                for idx, (img, col) in enumerate(zip(images, cols * (len(images) // 3 + 1))):
-                    with col:
-                        st.image(img, caption=f"Figure {idx+1}", use_column_width=True)
+                st.markdown("### Document Figures")
+                # Use a single column for the figure gallery
+                for idx, img in enumerate(images):
+                    st.image(
+                        img,
+                        caption=f"Figure {idx+1}",
+                        use_container_width=True  # Updated parameter
+                    )
         
         # Create agents
         with st.spinner("Initializing review agents..."):
             agents = create_review_agents(
-                num_reviewers=len(config['reviewers']),
+                n_agents=len(config['reviewers']),  # Updated parameter name
                 review_type=config['document_type'].lower(),
                 include_moderator=len(config['reviewers']) > 1
             )
@@ -1180,14 +1177,9 @@ def process_review(uploaded_file):
         # Display results
         st.success("✅ Review completed successfully!")
         
-        # Results tabs
-        tab1, tab2 = st.tabs(["Review Results", "Document Analysis"])
-        
-        with tab1:
-            display_review_results(results)
-        
-        with tab2:
-            display_document_analysis(metadata, images, text_content)
+        # Results section
+        st.markdown("## Review Results")
+        display_review_results(results)
         
         # Download options
         col1, col2 = st.columns(2)
@@ -1424,7 +1416,7 @@ def extract_pdf_content(pdf_file) -> Tuple[str, List[Image.Image], Dict[str, Any
     except Exception as e:
         raise Exception(f"Error processing PDF: {str(e)}")
 
-def create_review_agents(num_agents: int, review_type: str = "paper", include_moderator: bool = False) -> List[ChatOpenAI]:
+def create_review_agents(n_agents: int, review_type: str = "paper", include_moderator: bool = False) -> List[ChatOpenAI]:
     """Create review agents including a moderator if specified."""
     model = "gpt-4-turbo-preview"  # Using the latest GPT-4 model
     
@@ -1434,11 +1426,11 @@ def create_review_agents(num_agents: int, review_type: str = "paper", include_mo
             temperature=st.session_state.temperature,
             openai_api_key=api_key,
             model=model
-        ) for _ in range(num_agents)
+        ) for _ in range(n_agents)
     ]
     
     # Add moderator agent if requested and multiple reviewers
-    if include_moderator and num_agents > 1:
+    if include_moderator and n_agents > 1:
         moderator_agent = ChatOpenAI(
             temperature=0.1,  # Lower temperature for moderator
             openai_api_key=api_key,
@@ -1450,17 +1442,13 @@ def create_review_agents(num_agents: int, review_type: str = "paper", include_mo
 
 def display_document_analysis(metadata: Dict[str, Any], images: List[Image.Image], text_content: str):
     """Display detailed document analysis."""
-    # Document statistics
     st.markdown("### Document Statistics")
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Total Pages", metadata['total_pages'])
-    with col2:
-        st.metric("Sections", len(metadata['sections']))
-    with col3:
-        st.metric("Figures", len(images))
-    with col4:
-        st.metric("Word Count", len(text_content.split()))
+    st.markdown(f"""
+    - Total Pages: {metadata['total_pages']}
+    - Total Sections: {len(metadata['sections'])}
+    - Total Figures: {len(images)}
+    - Word Count: {len(text_content.split())}
+    """)
     
     # Section analysis
     st.markdown("### Section Details")
@@ -1474,10 +1462,12 @@ def display_document_analysis(metadata: Dict[str, Any], images: List[Image.Image
     # Figure gallery
     if images:
         st.markdown("### Figure Gallery")
-        gallery_cols = st.columns(3)
         for idx, img in enumerate(images):
-            with gallery_cols[idx % 3]:
-                st.image(img, caption=f"Figure {idx+1}", use_column_width=True)
+            st.image(
+                img,
+                caption=f"Figure {idx+1}",
+                use_container_width=True  # Updated parameter
+            )
 
 def extract_all_scores(results: Dict[str, Any]) -> Dict[str, Any]:
     """Extract all scores from review results."""
@@ -1927,7 +1917,7 @@ def main_content():
             )
             
             st.session_state.debug_mode = st.checkbox(
-                "Debug Mode",
+                "Debug Mode","Debug Mode",
                 value=st.session_state.debug_mode,
                 help="Show detailed logging information"
             )
