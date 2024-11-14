@@ -1,4 +1,13 @@
 import streamlit as st
+
+# Must be the first Streamlit command
+st.set_page_config(
+    page_title="Multi-Agent Scientific Review System",
+    page_icon="📝",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
 import logging
 from openai import OpenAI
 from langchain_openai import ChatOpenAI
@@ -25,6 +34,74 @@ logging.basicConfig(level=logging.INFO)
 api_key = st.secrets["openai_api_key"]
 client = OpenAI(api_key=api_key)
 DEFAULT_MODEL = "gpt-4o"
+
+# Custom CSS
+st.markdown("""
+    <style>
+    .main-header {
+        font-size: 2.5rem;
+        font-weight: bold;
+        margin-bottom: 2rem;
+        color: #1f77b4;
+    }
+    .section-header {
+        font-size: 1.8rem;
+        margin-top: 2rem;
+        margin-bottom: 1rem;
+        color: #2c3e50;
+    }
+    .info-box {
+        background-color: #f8f9fa;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        border-left: 4px solid #1f77b4;
+        margin: 1rem 0;
+    }
+    .warning-box {
+        background-color: #fff3cd;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        border-left: 4px solid #ffc107;
+        margin: 1rem 0;
+    }
+    .success-box {
+        background-color: #d4edda;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        border-left: 4px solid #28a745;
+        margin: 1rem 0;
+    }
+    .error-box {
+        background-color: #f8d7da;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        border-left: 4px solid #dc3545;
+        margin: 1rem 0;
+    }
+    .reviewer-card {
+        background-color: white;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        margin: 1rem 0;
+    }
+    .score-display {
+        font-size: 1.2rem;
+        font-weight: bold;
+        color: #1f77b4;
+    }
+    .history-item {
+        cursor: pointer;
+        padding: 0.5rem;
+        border-radius: 0.3rem;
+        margin: 0.3rem 0;
+        transition: background-color 0.2s;
+    }
+    .history-item:hover {
+        background-color: #f8f9fa;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
 class ReviewPersistenceManager:
     def __init__(self, storage_dir: str = "data/reviews"):
@@ -1325,14 +1402,7 @@ def extract_scores_from_review(review_text: str) -> Dict[str, Union[float, str]]
     
     return scores
 
-def main():
-    st.set_page_config(
-        page_title="Multi-Agent Scientific Review System",
-        page_icon="📝",
-        layout="wide",
-        initial_sidebar_state="expanded"
-    )
-    
+def main():    
     # Initialize application state
     init_app_state()
     
