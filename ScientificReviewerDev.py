@@ -7,7 +7,7 @@ import fitz
 import io
 from PIL import Image
 import base64
-from typing import List, Dict, Any, Tuple, Union
+from typing import List, Dict, Any, Tuple, Union, Optional
 import tiktoken
 import time
 import json
