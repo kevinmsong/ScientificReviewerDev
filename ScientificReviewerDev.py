@@ -539,7 +539,7 @@ class EnhancedReviewContext:
         except Exception as e:
             logging.error(f"Error extracting expertise keywords: {e}")
         return keywords
-    
+
 class ReviewProcessor:
     def __init__(self, context_manager: EnhancedReviewContext):
         """Initialize the review processor with context management."""
@@ -1096,6 +1096,131 @@ def show_configuration_tab():
         with st.expander("Current Review Status", expanded=True):
             display_review_results(st.session_state.current_review)
 
+def process_review(uploaded_file):
+    """Process the review with current configuration."""
+    try:
+        config = st.session_state.review_config
+        
+        # Extract content from PDF
+        with st.spinner("Extracting content from PDF..."):
+            text_content, images, metadata = extract_pdf_content(uploaded_file)
+            
+            # Display document overview in main area
+            st.markdown("## Document Overview")
+            
+            # Document metadata
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Pages", metadata['total_pages'])
+            with col2:
+                st.metric("Figures", len(images))
+            with col3:
+                st.metric("Sections", len(metadata['sections']))
+            
+            # Document details
+            st.markdown("### Document Information")
+            st.markdown(f"""
+            - **Title:** {metadata['title']}
+            - **Author:** {metadata['author']}
+            - **Venue:** {config['venue']}
+            - **Type:** {config['document_type']}
+            """)
+            
+            # Section overview
+            st.markdown("### Section Analysis")
+            for section in metadata['sections']:
+                with st.expander(f"📄 {section['title']}", expanded=False):
+                    st.write(f"Content length: {section['content_length']} characters")
+            
+            # Display figures if available
+            if images:
+                st.markdown("### Figures")
+                cols = st.columns(min(len(images), 3))
+                for idx, (img, col) in enumerate(zip(images, cols * (len(images) // 3 + 1))):
+                    with col:
+                        st.image(img, caption=f"Figure {idx+1}", use_column_width=True)
+        
+        # Create agents
+        with st.spinner("Initializing review agents..."):
+            agents = create_review_agents(
+                num_reviewers=len(config['reviewers']),
+                review_type=config['document_type'].lower(),
+                include_moderator=len(config['reviewers']) > 1
+            )
+        
+        # Process review with progress tracking
+        progress_container = st.container()
+        with progress_container:
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            def update_progress(progress, status):
+                progress_bar.progress(int(progress))
+                status_text.text(f"🔄 {status}")
+        
+            results = st.session_state.review_processor.process_review(
+                content=text_content,
+                agents=agents,
+                expertises=[r['expertise'] for r in config['reviewers'].values()],
+                custom_prompts=[r['prompt'] for r in config['reviewers'].values()],
+                review_type=config['document_type'].lower(),
+                venue=config['venue'],
+                num_iterations=config['num_iterations'],
+                progress_callback=update_progress
+            )
+        
+        # Clear progress indicators
+        progress_container.empty()
+        
+        # Save results
+        st.session_state.current_review = results
+        results['document_metadata'] = metadata
+        results['config'] = config
+        
+        # Display results
+        st.success("✅ Review completed successfully!")
+        
+        # Results tabs
+        tab1, tab2 = st.tabs(["Review Results", "Document Analysis"])
+        
+        with tab1:
+            display_review_results(results)
+        
+        with tab2:
+            display_document_analysis(metadata, images, text_content)
+        
+        # Download options
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("📥 Download Full Report", use_container_width=True):
+                report_content = generate_review_report(results)
+                st.download_button(
+                    label="Save Report",
+                    data=report_content,
+                    file_name=f"review_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md",
+                    mime="text/markdown"
+                )
+        
+        with col2:
+            if st.button("📊 Export Analysis Data", use_container_width=True):
+                analysis_data = {
+                    'metadata': metadata,
+                    'analysis': results.get('analysis', {}),
+                    'scores': extract_all_scores(results)
+                }
+                st.download_button(
+                    label="Save Analysis",
+                    data=json.dumps(analysis_data, indent=2),
+                    file_name=f"analysis_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                    mime="application/json"
+                )
+        
+    except Exception as e:
+        st.error(f"❌ Error processing review: {str(e)}")
+        if st.session_state.get('debug_mode', False):
+            st.exception(e)
+        raise
+
 def show_review_process_tab():
     """Display the review process interface."""
     st.markdown('<h2 class="section-header">Document Review</h2>', unsafe_allow_html=True)
@@ -1323,30 +1448,6 @@ def create_review_agents(num_agents: int, review_type: str = "paper", include_mo
     
     return agents
 
-def create_review_agents(num_agents: int, review_type: str = "paper", include_moderator: bool = False) -> List[ChatOpenAI]:
-    """Create review agents including a moderator if specified."""
-    model = "gpt-4-turbo-preview"  # Using the latest GPT-4 model
-    
-    # Create regular review agents
-    agents = [
-        ChatOpenAI(
-            temperature=st.session_state.temperature,
-            openai_api_key=api_key,
-            model=model
-        ) for _ in range(num_agents)
-    ]
-    
-    # Add moderator agent if requested and multiple reviewers
-    if include_moderator and num_agents > 1:
-        moderator_agent = ChatOpenAI(
-            temperature=0.1,  # Lower temperature for moderator
-            openai_api_key=api_key,
-            model=model
-        )
-        agents.append(moderator_agent)
-    
-    return agents
-
 def display_document_analysis(metadata: Dict[str, Any], images: List[Image.Image], text_content: str):
     """Display detailed document analysis."""
     # Document statistics
@@ -1377,6 +1478,29 @@ def display_document_analysis(metadata: Dict[str, Any], images: List[Image.Image
         for idx, img in enumerate(images):
             with gallery_cols[idx % 3]:
                 st.image(img, caption=f"Figure {idx+1}", use_column_width=True)
+
+def extract_all_scores(results: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract all scores from review results."""
+    scores = {
+        'overall': {},
+        'by_reviewer': {},
+        'by_category': defaultdict(list)
+    }
+    
+    for iteration in results['iterations']:
+        for review in iteration['reviews']:
+            if review.get('success', False):
+                reviewer_scores = extract_scores_from_review(review['review_text'])
+                scores['by_reviewer'][review['expertise']] = reviewer_scores
+                
+                for category, score in reviewer_scores.items():
+                    scores['by_category'][category].append(score)
+    
+    # Calculate averages
+    for category, category_scores in scores['by_category'].items():
+        scores['overall'][category] = sum(category_scores) / len(category_scores)
+    
+    return scores
 
 def extract_all_scores(results: Dict[str, Any]) -> Dict[str, Any]:
     """Extract all scores from review results."""
@@ -1802,7 +1926,7 @@ def main_content():
                 help="Controls randomness in model responses"
             )
             
-            st.session_state.debug_mode = st.checkbox(
+            st.session_state.debug_mode = st.checkbox(st.session_state.debug_mode = st.checkbox(
                 "Debug Mode",
                 value=st.session_state.debug_mode,
                 help="Show detailed logging information"
