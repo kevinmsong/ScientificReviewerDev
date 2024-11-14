@@ -986,44 +986,21 @@ def show_configuration_tab():
             help="Include separate scores for Significance, Innovation, and Approach"
         )
     
-    # File Upload Section with Custom Styling
-    st.markdown("""
-    <style>
-    .upload-container {
-        border: 2px dashed #1f77b4;
-        border-radius: 10px;
-        padding: 20px;
-        margin: 20px 0;
-        text-align: center;
-        background-color: #f8f9fa;
-    }
-    .upload-header {
-        color: #1f77b4;
-        font-size: 1.2em;
-        margin-bottom: 10px;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-    
-    st.markdown('<div class="upload-container">', unsafe_allow_html=True)
-    st.markdown(f'<p class="upload-header">Upload {doc_type} for Review</p>', unsafe_allow_html=True)
+    # File Upload Section
+    st.markdown("### Upload Document")
     
     uploaded_file = st.file_uploader(
-        "Choose a PDF file",
+        f"Upload {doc_type} (PDF format)",
         type=["pdf"],
         key="document_upload"
     )
     
     if uploaded_file:
-        st.success(f"Uploaded: {uploaded_file.name}")
-        file_details = {
-            "Filename": uploaded_file.name,
-            "FileType": uploaded_file.type,
-            "FileSize": f"{uploaded_file.size / 1024:.2f} KB"
-        }
-        st.json(file_details)
-    
-    st.markdown('</div>', unsafe_allow_html=True)
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            st.success(f"✅ {uploaded_file.name} uploaded successfully")
+        with col2:
+            st.info(f"Size: {uploaded_file.size / 1024:.1f} KB")
     
     # Reviewer Configuration Section
     st.markdown('<h2 class="section-header">Reviewer Configuration</h2>', unsafe_allow_html=True)
@@ -1035,9 +1012,9 @@ def show_configuration_tab():
     # Add/remove reviewer buttons
     col1, col2 = st.columns([1, 4])
     with col1:
-        if st.button("Add Reviewer", key="add_reviewer"):
+        if st.button("➕ Add", key="add_reviewer"):
             st.session_state.num_reviewers += 1
-        if st.button("Remove Reviewer", key="remove_reviewer") and st.session_state.num_reviewers > 1:
+        if st.button("➖ Remove", key="remove_reviewer") and st.session_state.num_reviewers > 1:
             st.session_state.num_reviewers -= 1
     
     # Reviewer configuration
@@ -1072,10 +1049,12 @@ def show_configuration_tab():
         help="Number of rounds of discussion between reviewers"
     )
     
-    # Save configuration and generate review buttons
+    # Action buttons
+    st.markdown("### Review Actions")
+    
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("Save Configuration", key="save_config", type="primary"):
+        if st.button("💾 Save Configuration", key="save_config", use_container_width=True):
             st.session_state.review_config = {
                 "document_type": doc_type,
                 "venue": venue,
@@ -1086,29 +1065,36 @@ def show_configuration_tab():
                 "bias": st.session_state.bias,
                 "temperature": st.session_state.temperature
             }
-            st.success("Configuration saved successfully!")
+            st.success("✅ Configuration saved successfully!")
     
     with col2:
-        generate_button = st.button(
-            "Generate Review",
-            key="generate_review",
-            type="primary",
-            disabled=not (uploaded_file and 'review_config' in st.session_state)
-        )
+        # Generate review button with dependency checks
+        can_generate = uploaded_file and 'review_config' in st.session_state
+        button_label = "🚀 Generate Review" if can_generate else "Upload PDF and Save Config First"
         
-        if generate_button:
+        if st.button(
+            button_label,
+            key="generate_review",
+            disabled=not can_generate,
+            use_container_width=True
+        ):
             if not uploaded_file:
-                st.error("Please upload a PDF file first.")
+                st.error("❌ Please upload a PDF file first.")
             elif 'review_config' not in st.session_state:
-                st.error("Please save the configuration first.")
+                st.error("❌ Please save the configuration first.")
             else:
-                with st.spinner("Processing review..."):
+                with st.spinner("📊 Processing review..."):
                     try:
                         process_review(uploaded_file)
                     except Exception as e:
-                        st.error(f"Error during review process: {str(e)}")
+                        st.error(f"❌ Error during review process: {str(e)}")
                         if st.session_state.get('debug_mode', False):
                             st.exception(e)
+
+    # Show review status
+    if 'current_review' in st.session_state:
+        with st.expander("Current Review Status", expanded=True):
+            display_review_results(st.session_state.current_review)
 
 def show_review_process_tab():
     """Display the review process interface."""
@@ -1832,7 +1818,7 @@ def main_content():
                 help="Show detailed logging information"
             )
     
-    # Main content area with tabs# Main content area with tabs
+    # Main content area with tabs
     tab1, tab2 = st.tabs(["Configure & Review", "Review History"])
     
     with tab1:
