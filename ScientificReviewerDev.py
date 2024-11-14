@@ -1788,7 +1788,7 @@ def get_default_reviewer_prompt(doc_type: str) -> str:
 
 def extract_key_points(text: str) -> List[str]:
     """Extract key points from review text."""
-    points = []points = []
+    points = []
     patterns = [
         r'(?:•|\*|\-|\d+\.)\s*([^\n]+)',
         r'key\s+points?:([^\n]+)',
