@@ -1106,9 +1106,6 @@ def process_review(uploaded_file):
             
             # Document Overview spanning full width
             st.markdown("## Document Overview")
-            
-            # Use a single column for full width content
-            st.markdown("### Document Information")
             st.markdown(f"""
             - **Title:** {metadata['title']}
             - **Author:** {metadata['author']}
@@ -1128,18 +1125,17 @@ def process_review(uploaded_file):
             # Display figures if available
             if images:
                 st.markdown("### Document Figures")
-                # Use a single column for the figure gallery
                 for idx, img in enumerate(images):
                     st.image(
                         img,
                         caption=f"Figure {idx+1}",
-                        use_container_width=True  # Updated parameter
+                        use_container_width=True
                     )
         
         # Create agents
         with st.spinner("Initializing review agents..."):
             agents = create_review_agents(
-                n_agents=len(config['reviewers']),  # Updated parameter name
+                n_agents=len(config['reviewers']),
                 review_type=config['document_type'].lower(),
                 include_moderator=len(config['reviewers']) > 1
             )
@@ -1921,7 +1917,7 @@ def main_content():
             # Debug mode checkbox
             debug_mode = st.checkbox(
                 "Debug Mode",
-                value=st.session_state.debug_mode,
+                value=st.session_state.debug_mode,value=st.session_state.debug_mode,
                 key="debug_checkbox"
             )
             st.session_state.debug_mode = debug_mode
