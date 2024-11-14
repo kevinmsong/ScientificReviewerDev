@@ -1,7 +1,7 @@
 import streamlit as st
 
 # Must be the first Streamlit command
-st.set_page_config(st.set_page_config(
+st.set_page_config(
     page_title="Multi-Agent Scientific Review System",
     page_icon="📝",
     layout="wide",
