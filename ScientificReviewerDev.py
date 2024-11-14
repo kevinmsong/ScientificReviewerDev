@@ -1052,40 +1052,43 @@ def show_configuration_tab():
     # Action buttons
     st.markdown("### Review Actions")
 
-    # Save Configuration button
-    st.write("")  # Add an empty line to separate the buttons
-    if st.button("💾 Save Configuration", key="save_config"):
-        st.session_state.review_config = {
-            "document_type": doc_type,
-            "venue": venue,
-            "rating_system": rating_system,
-            "is_nih_grant": is_nih_grant,
-            "reviewers": reviewer_config,
-            "num_iterations": num_iterations,
-            "bias": st.session_state.bias,
-            "temperature": st.session_state.temperature
-        }
-        st.success("✅ Configuration saved successfully!")
+    # Place the buttons in separate containers
+    save_config_col, generate_review_col = st.columns(2)
 
-    # Generate Review button with dependency checks
-    can_generate = uploaded_file and 'review_config' in st.session_state
-    if st.button(
-        "🚀 Generate Review",
-        key="generate_review",
-        disabled=not can_generate
-    ):
-        if not uploaded_file:
-            st.error("❌ Please upload a PDF file first.")
-        elif 'review_config' not in st.session_state:
-            st.error("❌ Please save the configuration first.")
-        else:
-            with st.spinner("📊 Processing review..."):
-                try:
-                    process_review(uploaded_file)
-                except Exception as e:
-                    st.error(f"❌ Error during review process: {str(e)}")
-                    if st.session_state.get('debug_mode', False):
-                        st.exception(e)
+    with save_config_col:
+        if st.button("💾 Save Configuration", key="save_config"):
+            st.session_state.review_config = {
+                "document_type": doc_type,
+                "venue": venue,
+                "rating_system": rating_system,
+                "is_nih_grant": is_nih_grant,
+                "reviewers": reviewer_config,
+                "num_iterations": num_iterations,
+                "bias": st.session_state.bias,
+                "temperature": st.session_state.temperature
+            }
+            st.success("✅ Configuration saved successfully!")
+
+    with generate_review_col:
+        # Generate Review button with dependency checks
+        can_generate = uploaded_file and 'review_config' in st.session_state
+        if st.button(
+            "🚀 Generate Review",
+            key="generate_review",
+            disabled=not can_generate
+        ):
+            if not uploaded_file:
+                st.error("❌ Please upload a PDF file first.")
+            elif 'review_config' not in st.session_state:
+                st.error("❌ Please save the configuration first.")
+            else:
+                with st.spinner("📊 Processing review..."):
+                    try:
+                        process_review(uploaded_file)
+                    except Exception as e:
+                        st.error(f"❌ Error during review process: {str(e)}")
+                        if st.session_state.get('debug_mode', False):
+                            st.exception(e)
 
     # Show review status
     if 'current_review' in st.session_state:
