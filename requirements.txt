@@ -5,3 +5,4 @@ PyPDF2
 Pillow
 python-dotenv
 aiohttp
+langchain_openai
