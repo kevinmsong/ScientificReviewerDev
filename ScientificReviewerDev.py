@@ -1189,13 +1189,6 @@ def process_review(uploaded_file):
     except Exception as e:
         raise Exception(f"Error processing review: {str(e)}")
 
-if __name__ == "__main__":
-    try:
-        main()
-    except Exception as e:
-        st.error(f"An unexpected error occurred: {str(e)}")
-        logging.exception("Unexpected error in main application:")
-
 def display_review_results(results: Dict[str, Any]):
     """Display review results with enhanced formatting and visualization."""
     st.markdown('<h2 class="section-header">Review Results</h2>', unsafe_allow_html=True)
