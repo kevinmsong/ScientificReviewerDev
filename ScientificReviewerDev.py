@@ -649,145 +649,81 @@ def init_app_state():
             st.error(f"Error initializing application state: {e}")
             raise
 
-def main():
-    st.set_page_config(
-        page_title="Multi-Agent Scientific Review System",
-        page_icon="📝",
-        layout="wide",
-        initial_sidebar_state="expanded"
+def show_review_history():
+    """Display review history in the sidebar."""
+    if 'persistence_manager' not in st.session_state:
+        st.warning("Review history not available.")
+        return
+    
+    reviews = st.session_state.persistence_manager.get_all_reviews(limit=10)
+    
+    if not reviews:
+        st.info("No previous reviews found.")
+        return
+    
+    for review in reviews:
+        with st.container():
+            col1, col2 = st.columns([3, 1])
+            
+            with col1:
+                st.markdown(
+                    f"**{review.get('document_type', 'Unknown')}** - "
+                    f"{review.get('venue', 'Unknown venue')}\n\n"
+                    f"*{review.get('metadata', {}).get('started_at', 'Unknown date')[:10]}*"
+                )
+            
+            with col2:
+                if st.button("View", key=f"view_{review.get('review_id', '')}"):
+                    st.session_state.selected_review_id = review.get('review_id')
+                    st.session_state.view_mode = 'history'
+
+def show_selected_review():
+    """Display the selected review from history."""
+    if not hasattr(st.session_state, 'selected_review_id'):
+        return
+    
+    review = st.session_state.persistence_manager.get_review_session(
+        st.session_state.selected_review_id
     )
     
-    init_app_state()
-
-    # Initialize context manager
-    if 'context_manager' not in st.session_state:
-        st.session_state.context_manager = EnhancedReviewContext()
+    if not review:
+        st.warning("Selected review not found.")
+        return
     
-    # Initialize review processor
-    if 'review_processor' not in st.session_state:
-        st.session_state.review_processor = ReviewProcessor(st.session_state.context_manager)
+    st.markdown(f"## Viewing Review: {review.get('document_type')} - {review.get('venue')}")
     
-    # Add custom CSS
-    st.markdown("""
-        <style>
-        .main-header {
-            font-size: 2.5rem;
-            font-weight: bold;
-            margin-bottom: 2rem;
-            color: #1f77b4;
-        }
-        .section-header {
-            font-size: 1.8rem;
-            margin-top: 2rem;
-            margin-bottom: 1rem;
-            color: #2c3e50;
-        }
-        .info-box {
-            background-color: #f8f9fa;
-            padding: 1rem;
-            border-radius: 0.5rem;
-            border-left: 4px solid #1f77b4;
-            margin: 1rem 0;
-        }
-        .warning-box {
-            background-color: #fff3cd;
-            padding: 1rem;
-            border-radius: 0.5rem;
-            border-left: 4px solid #ffc107;
-            margin: 1rem 0;
-        }
-        .success-box {
-            background-color: #d4edda;
-            padding: 1rem;
-            border-radius: 0.5rem;
-            border-left: 4px solid #28a745;
-            margin: 1rem 0;
-        }
-        .error-box {
-            background-color: #f8d7da;
-            padding: 1rem;
-            border-radius: 0.5rem;
-            border-left: 4px solid #dc3545;
-            margin: 1rem 0;
-        }
-        .reviewer-card {
-            background-color: white;
-            padding: 1rem;
-            border-radius: 0.5rem;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            margin: 1rem 0;
-        }
-        .score-display {
-            font-size: 1.2rem;
-            font-weight: bold;
-            color: #1f77b4;
-        }
-        .history-item {
-            cursor: pointer;
-            padding: 0.5rem;
-            border-radius: 0.3rem;
-            margin: 0.3rem 0;
-            transition: background-color 0.2s;
-        }
-        .history-item:hover {
-            background-color: #f8f9fa;
-        }
-        </style>
-        """, unsafe_allow_html=True)
+    # Display review metadata
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.markdown(f"**Date:** {review.get('metadata', {}).get('started_at', 'Unknown')[:10]}")
+    with col2:
+        st.markdown(f"**Type:** {review.get('document_type', 'Unknown')}")
+    with col3:
+        st.markdown(f"**Venue:** {review.get('venue', 'Unknown')}")
     
-    st.markdown('<h1 class="main-header">Multi-Agent Scientific Review System</h1>', unsafe_allow_html=True)
+    # Display iterations
+    for iteration in review.get('iterations', []):
+        with st.expander(f"Iteration {iteration.get('iteration_number', '?')}", expanded=True):
+            for rev in iteration.get('reviews', []):
+                if rev.get('success', False):
+                    st.markdown(f"### Review by {rev.get('expertise', 'Unknown Expert')}")
+                    st.markdown(rev.get('review_text', 'No review text available.'))
+                    st.markdown("---")
     
-    # Sidebar Configuration
-    with st.sidebar:
-        st.header("Review Configuration")
-        
-        # Reviewer bias slider
-        bias = st.slider(
-            "Reviewer Bias",
-            min_value=-2,
-            max_value=2,
-            value=0,
-            help="""
-            -2: Extremely negative and biased
-            -1: Somewhat negative and biased
-            0: Unbiased/objective
-            1: Positive and enthusiastic
-            2: Extremely positive and passionate
-            """
+    # Display moderation
+    if review.get('moderation'):
+        with st.expander("Moderator Analysis", expanded=True):
+            st.markdown(review.get('moderation'))
+    
+    # Download button
+    if st.button("Download Review Report", key=f"download_{review.get('review_id')}"):
+        report_content = generate_review_report(review)
+        st.download_button(
+            label="Download Report",
+            data=report_content,
+            file_name=f"review_report_{review.get('review_id')}.md",
+            mime="text/markdown"
         )
-        
-        # View previous reviews
-        with st.expander("Previous Reviews", expanded=False):
-            show_review_history()
-        
-        # Advanced settings
-        with st.expander("Advanced Settings", expanded=False):
-            temperature = st.slider(
-                "Model Temperature",
-                min_value=0.0,
-                max_value=1.0,
-                value=0.1,
-                step=0.1,
-                help="Controls randomness in model responses"
-            )
-            
-            debug_mode = st.checkbox(
-                "Debug Mode",
-                value=False,
-                help="Show detailed logging information"
-            )
-    
-    # Main content area
-    tab1, tab2, tab3 = st.tabs(["Configuration", "Review Process", "History"])
-    
-    with tab1:
-        show_configuration_tab()
-    
-    with tab2:
-        show_review_process_tab()
-    
-    with tab3:
-        show_history_tab()
 
 def show_configuration_tab():
     """Display the configuration interface."""
@@ -921,11 +857,11 @@ def show_review_process_tab():
                     st.exception(e)
 
 def show_history_tab():
-    """Display the review history interface."""
+    """Display the review history tab."""
     st.markdown('<h2 class="section-header">Review History</h2>', unsafe_allow_html=True)
     
     # Get all reviews from context manager
-    reviews = st.session_state.context_manager.persistence_manager.get_all_reviews()
+    reviews = st.session_state.persistence_manager.get_all_reviews()
     
     if not reviews:
         st.info("No previous reviews found.")
@@ -945,16 +881,19 @@ def show_history_tab():
             options=list(set(review['venue'] for review in reviews if 'venue' in review))
         )
     
-    # Display filtered reviews
+    # Apply filters
     filtered_reviews = [
         review for review in reviews
         if (not filter_type or review.get('document_type') in filter_type)
         and (not filter_venue or review.get('venue') in filter_venue)
     ]
     
+    # Display filtered reviews
     for review in filtered_reviews:
         with st.expander(
-            f"{review.get('document_type', 'Unknown')} - {review.get('venue', 'Unknown')} - {review.get('metadata', {}).get('started_at', 'Unknown date')[:10]}",
+            f"{review.get('document_type', 'Unknown')} - "
+            f"{review.get('venue', 'Unknown')} - "
+            f"{review.get('metadata', {}).get('started_at', 'Unknown date')[:10]}",
             expanded=False
         ):
             show_review_details(review)
@@ -973,7 +912,17 @@ def show_review_details(review: Dict[str, Any]):
         for rev in iteration.get('reviews', []):
             if rev.get('success', False):
                 with st.expander(f"Review by {rev.get('expertise')}", expanded=False):
-                    st.markdown(rev.get('review_text'))
+                    # Display scores if available
+                    scores = extract_scores_from_review(rev.get('review_text', ''))
+                    if scores:
+                        st.markdown("#### Scores")
+                        cols = st.columns(len(scores))
+                        for col, (category, score) in zip(cols, scores.items()):
+                            with col:
+                                display_score(category, score)
+                    
+                    # Display review text
+                    st.markdown(rev.get('review_text', ''))
     
     # Moderation result
     if review.get('moderation'):
@@ -989,6 +938,7 @@ def show_review_details(review: Dict[str, Any]):
             file_name=f"review_report_{review.get('review_id')}.md",
             mime="text/markdown"
         )
+
 
 def process_review(uploaded_file):
     """Process the review with current configuration."""
@@ -1374,3 +1324,264 @@ def extract_scores_from_review(review_text: str) -> Dict[str, Union[float, str]]
                     continue
     
     return scores
+
+def main():
+    st.set_page_config(
+        page_title="Multi-Agent Scientific Review System",
+        page_icon="📝",
+        layout="wide",
+        initial_sidebar_state="expanded"
+    )
+    
+    # Initialize application state
+    init_app_state()
+    
+    # Add custom CSS
+    st.markdown("""
+        <style>
+        .main-header {
+            font-size: 2.5rem;
+            font-weight: bold;
+            margin-bottom: 2rem;
+            color: #1f77b4;
+        }
+        .section-header {
+            font-size: 1.8rem;
+            margin-top: 2rem;
+            margin-bottom: 1rem;
+            color: #2c3e50;
+        }
+        .info-box {
+            background-color: #f8f9fa;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            border-left: 4px solid #1f77b4;
+            margin: 1rem 0;
+        }
+        .warning-box {
+            background-color: #fff3cd;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            border-left: 4px solid #ffc107;
+            margin: 1rem 0;
+        }
+        .success-box {
+            background-color: #d4edda;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            border-left: 4px solid #28a745;
+            margin: 1rem 0;
+        }
+        .error-box {
+            background-color: #f8d7da;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            border-left: 4px solid #dc3545;
+            margin: 1rem 0;
+        }
+        .reviewer-card {
+            background-color: white;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin: 1rem 0;
+        }
+        .score-display {
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: #1f77b4;
+        }
+        .history-item {
+            cursor: pointer;
+            padding: 0.5rem;
+            border-radius: 0.3rem;
+            margin: 0.3rem 0;
+            transition: background-color 0.2s;
+        }
+        .history-item:hover {
+            background-color: #f8f9fa;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+    
+    st.markdown('<h1 class="main-header">Multi-Agent Scientific Review System</h1>', unsafe_allow_html=True)
+    
+    # Sidebar Configuration
+    with st.sidebar:
+        st.header("Review Configuration")
+        
+        # Reviewer bias slider
+        bias = st.slider(
+            "Reviewer Bias",
+            min_value=-2,
+            max_value=2,
+            value=0,
+            help="""
+            -2: Extremely negative and biased
+            -1: Somewhat negative and biased
+            0: Unbiased/objective
+            1: Positive and enthusiastic
+            2: Extremely positive and passionate
+            """
+        )
+        
+        # View previous reviews
+        with st.expander("Review History", expanded=False):
+            show_review_history()
+        
+        # Advanced settings
+        with st.expander("Advanced Settings", expanded=False):
+            temperature = st.slider(
+                "Model Temperature",
+                min_value=0.0,
+                max_value=1.0,
+                value=0.1,
+                step=0.1,
+                help="Controls randomness in model responses"
+            )
+            
+            debug_mode = st.checkbox(
+                "Debug Mode",
+                value=False,
+                help="Show detailed logging information"
+            )
+    
+    # Main content tabs
+    tab1, tab2, tab3 = st.tabs(["New Review", "Active Reviews", "History"])
+    
+    with tab1:
+        # Initialize review settings
+        review_defaults = initialize_review_settings()
+        
+        # Document Configuration
+        st.markdown('<h2 class="section-header">Document Configuration</h2>', unsafe_allow_html=True)
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Document type selection
+            doc_type = st.selectbox(
+                "Document Type",
+                options=list(review_defaults.keys()),
+                key="doc_type"
+            )
+            
+            # Set default values based on document type
+            default_settings = review_defaults[doc_type]
+            
+            # Dissemination venue
+            venue = st.text_input(
+                "Dissemination Venue",
+                placeholder="e.g., Nature, NIH R01, Conference Name",
+                help="Where this work is intended to be published/presented"
+            )
+        
+        with col2:
+            # Rating system selection
+            rating_system = st.radio(
+                "Rating System",
+                options=["stars", "nih"],
+                format_func=lambda x: "Star Rating (1-5)" if x == "stars" else "NIH Scale (1-9)",
+                horizontal=True
+            )
+            
+            # NIH grant specific options
+            is_nih_grant = st.checkbox(
+                "NIH Grant Review Format",
+                value=True if doc_type == "Grant Proposal" else False,
+                help="Include separate scores for Significance, Innovation, and Approach"
+            )
+        
+        # Reviewer Configuration
+        st.markdown('<h2 class="section-header">Reviewer Configuration</h2>', unsafe_allow_html=True)
+        
+        # Initialize session state for reviewers if not exists
+        if 'num_reviewers' not in st.session_state:
+            st.session_state.num_reviewers = default_settings['reviewers']
+        
+        # Add/remove reviewer buttons
+        col1, col2 = st.columns([1, 4])
+        with col1:
+            if st.button("Add Reviewer"):
+                st.session_state.num_reviewers += 1
+            if st.button("Remove Reviewer") and st.session_state.num_reviewers > 1:
+                st.session_state.num_reviewers -= 1
+        
+        # Reviewer configuration
+        reviewer_config = {}
+        for i in range(st.session_state.num_reviewers):
+            with st.expander(f"Reviewer {i+1} Configuration", expanded=True):
+                col1, col2 = st.columns(2)
+                with col1:
+                    expertise = st.text_input(
+                        "Expertise",
+                        value=f"Scientific Expert {i+1}",
+                        key=f"expertise_{i}"
+                    )
+                with col2:
+                    custom_prompt = st.text_area(
+                        "Custom Instructions",
+                        value=get_default_reviewer_prompt(doc_type),
+                        height=150,
+                        key=f"prompt_{i}"
+                    )
+                reviewer_config[f"reviewer_{i}"] = {
+                    "expertise": expertise,
+                    "prompt": custom_prompt
+                }
+        
+        # Number of iterations
+        num_iterations = st.number_input(
+            "Number of Discussion Iterations",
+            min_value=1,
+            max_value=5,
+            value=default_settings['iterations'],
+            help="Number of rounds of discussion between reviewers"
+        )
+        
+        # File upload
+        uploaded_file = st.file_uploader(
+            f"Upload {doc_type} (PDF)",
+            type=["pdf"],
+            key="uploaded_file"
+        )
+        
+        # Start review button
+        if st.button("Start Review Process", disabled=not uploaded_file):
+            with st.spinner("Processing review..."):
+                try:
+                    # Save configuration
+                    st.session_state.review_config = {
+                        "document_type": doc_type,
+                        "venue": venue,
+                        "rating_system": rating_system,
+                        "is_nih_grant": is_nih_grant,
+                        "reviewers": reviewer_config,
+                        "num_iterations": num_iterations,
+                        "bias": bias,
+                        "temperature": temperature
+                    }
+                    
+                    # Process review
+                    process_review(uploaded_file)
+                    
+                except Exception as e:
+                    st.error(f"Error during review process: {str(e)}")
+                    if debug_mode:
+                        st.exception(e)
+    
+    with tab2:
+        if hasattr(st.session_state, 'current_review'):
+            display_review_results(st.session_state.current_review)
+        else:
+            st.info("No active review in progress.")
+    
+    with tab3:
+        show_history_tab()
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as e:
+        st.error(f"An unexpected error occurred: {str(e)}")
+        logging.exception("Unexpected error in main application:")
