@@ -1299,117 +1299,107 @@ def extract_pdf_content(pdf_file) -> Tuple[str, List[Image.Image], Dict[str, Any
     except Exception as e:
         raise Exception(f"Error processing PDF: {str(e)}")
 
-def process_review(uploaded_file):
-    """Process the review with current configuration."""
-    try:
-        config = st.session_state.review_config
-        
-        # Extract content from PDF
-        with st.spinner("Extracting content from PDF..."):
-            text_content, images, metadata = extract_pdf_content(uploaded_file)
-            
-            # Display document overview
-            st.markdown("### Document Overview")
-            col1, col2 = st.columns(2)
-            with col1:
-                st.write(f"Title: {metadata['title']}")
-                st.write(f"Author: {metadata['author']}")
-                st.write(f"Pages: {metadata['total_pages']}")
-            
-            with col2:
-                st.write("Sections:")
-                for section in metadata['sections']:
-                    st.write(f"- {section['title']}")
-            
-            if images:
-                st.write(f"Found {len(images)} figures/images")
-        
-        # Create enhanced prompt with document metadata
-        document_context = f"""Document Information:
-Title: {metadata['title']}
-Author: {metadata['author']}
-Length: {metadata['total_pages']} pages
-
-Document Structure:
-{chr(10).join([f"- {section['title']}" for section in metadata['sections']])}
-
-Review Context:
-- Venue: {config['venue']}
-- Document Type: {config['document_type']}
-- Rating System: {config['rating_system']}
-"""
-        
-        # Create agents
-        with st.spinner("Initializing review agents..."):
-            agents = create_review_agents(
-                num_reviewers=len(config['reviewers']),
-                review_type=config['document_type'].lower(),
-                include_moderator=len(config['reviewers']) > 1
-            )
-        
-        # Create enhanced prompts
-        review_prompts = []
-        for reviewer_id, reviewer_info in config['reviewers'].items():
-            base_prompt = reviewer_info['prompt']
-            expertise = reviewer_info['expertise']
-            
-            enhanced_prompt = f"""Document Context:
-{document_context}
-
-Reviewer Expertise: {expertise}
-Bias Level: {config['bias']} (-2 extremely critical to +2 extremely positive)
-
-{base_prompt}
-
-Please provide a detailed review following the above structure. For papers, provide specific section-by-section analysis and change suggestions.
-"""
-            review_prompts.append(enhanced_prompt)
-        
-        # Process review with progress tracking
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        
-        def update_progress(progress, status):
-            progress_bar.progress(int(progress))
-            status_text.text(status)
-        
-        results = st.session_state.review_processor.process_review(
-            content=text_content,
-            agents=agents,
-            expertises=[r['expertise'] for r in config['reviewers'].values()],
-            custom_prompts=review_prompts,
-            review_type=config['document_type'].lower(),
-            venue=config['venue'],
-            num_iterations=config['num_iterations'],
-            progress_callback=update_progress
+def create_review_agents(num_agents: int, review_type: str = "paper", include_moderator: bool = False) -> List[ChatOpenAI]:
+    """Create review agents including a moderator if specified."""
+    model = "gpt-4-turbo-preview"  # Using the latest GPT-4 model
+    
+    # Create regular review agents
+    agents = [
+        ChatOpenAI(
+            temperature=st.session_state.temperature,
+            openai_api_key=api_key,
+            model=model
+        ) for _ in range(num_agents)
+    ]
+    
+    # Add moderator agent if requested and multiple reviewers
+    if include_moderator and num_agents > 1:
+        moderator_agent = ChatOpenAI(
+            temperature=0.1,  # Lower temperature for moderator
+            openai_api_key=api_key,
+            model=model
         )
-        
-        # Save results
-        st.session_state.current_review = results
-        
-        # Store additional metadata
-        results['document_metadata'] = metadata
-        results['config'] = config
-        
-        # Display results
-        st.success("Review completed successfully!")
-        display_review_results(results)
-        
-        # Offer download
-        if st.button("Download Review Report"):
-            report_content = generate_review_report(results)
-            st.download_button(
-                label="Download Report",
-                data=report_content,
-                file_name=f"review_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md",
-                mime="text/markdown"
-            )
-        
-    except Exception as e:
-        st.error(f"Error processing review: {str(e)}")
-        if st.session_state.get('debug_mode', False):
-            st.exception(e)
-        raise
+        agents.append(moderator_agent)
+    
+    return agents
+
+def create_review_agents(num_agents: int, review_type: str = "paper", include_moderator: bool = False) -> List[ChatOpenAI]:
+    """Create review agents including a moderator if specified."""
+    model = "gpt-4-turbo-preview"  # Using the latest GPT-4 model
+    
+    # Create regular review agents
+    agents = [
+        ChatOpenAI(
+            temperature=st.session_state.temperature,
+            openai_api_key=api_key,
+            model=model
+        ) for _ in range(num_agents)
+    ]
+    
+    # Add moderator agent if requested and multiple reviewers
+    if include_moderator and num_agents > 1:
+        moderator_agent = ChatOpenAI(
+            temperature=0.1,  # Lower temperature for moderator
+            openai_api_key=api_key,
+            model=model
+        )
+        agents.append(moderator_agent)
+    
+    return agents
+
+def display_document_analysis(metadata: Dict[str, Any], images: List[Image.Image], text_content: str):
+    """Display detailed document analysis."""
+    # Document statistics
+    st.markdown("### Document Statistics")
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Total Pages", metadata['total_pages'])
+    with col2:
+        st.metric("Sections", len(metadata['sections']))
+    with col3:
+        st.metric("Figures", len(images))
+    with col4:
+        st.metric("Word Count", len(text_content.split()))
+    
+    # Section analysis
+    st.markdown("### Section Details")
+    for section in metadata['sections']:
+        with st.expander(f"📄 {section['title']}", expanded=False):
+            st.markdown(f"""
+            - Content Length: {section['content_length']} characters
+            - Word Count: {len(section.get('content', '').split())} words
+            """)
+    
+    # Figure gallery
+    if images:
+        st.markdown("### Figure Gallery")
+        gallery_cols = st.columns(3)
+        for idx, img in enumerate(images):
+            with gallery_cols[idx % 3]:
+                st.image(img, caption=f"Figure {idx+1}", use_column_width=True)
+
+def extract_all_scores(results: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract all scores from review results."""
+    scores = {
+        'overall': {},
+        'by_reviewer': {},
+        'by_category': defaultdict(list)
+    }
+    
+    for iteration in results['iterations']:
+        for review in iteration['reviews']:
+            if review.get('success', False):
+                reviewer_scores = extract_scores_from_review(review['review_text'])
+                scores['by_reviewer'][review['expertise']] = reviewer_scores
+                
+                for category, score in reviewer_scores.items():
+                    scores['by_category'][category].append(score)
+    
+    # Calculate averages
+    for category, category_scores in scores['by_category'].items():
+        scores['overall'][category] = sum(category_scores) / len(category_scores)
+    
+    return scores
 
 def display_review_results(results: Dict[str, Any]):
     """Display review results with enhanced formatting and visualization."""
