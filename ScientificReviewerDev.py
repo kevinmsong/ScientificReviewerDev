@@ -1819,7 +1819,7 @@ def main_content():
         with st.expander("Advanced Settings", expanded=False):
             st.session_state.temperature = st.slider(
                 "Model Temperature",
-                min_value=0.0,min_value=0.0,
+                min_value=0.0,
                 max_value=1.0,
                 value=st.session_state.temperature,
                 step=0.1,
