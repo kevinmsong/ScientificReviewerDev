@@ -103,6 +103,146 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
+# Add this function after the imports and before any other functions
+def get_default_prompts() -> Dict[str, Dict[str, str]]:
+    """Get default prompts for different document types and reviewer roles."""
+    return {
+        "Paper": {
+            "reviewer": """You are evaluating this scientific paper with the following structured approach:
+
+1. SECTION-BY-SECTION ANALYSIS:
+   - Introduction & Background
+     * Current content summary
+     * Required changes
+     * Optional improvements
+     * Line-specific edits
+   
+   - Methods
+     * Current content summary
+     * Required changes
+     * Optional improvements
+     * Line-specific edits
+   
+   - Results
+     * Current content summary
+     * Required changes
+     * Optional improvements
+     * Line-specific edits
+   
+   - Discussion
+     * Current content summary
+     * Required changes
+     * Optional improvements
+     * Line-specific edits
+
+2. OVERALL ASSESSMENT:
+   - Scientific Merit
+   - Technical Quality
+   - Presentation
+   - Impact
+
+3. SCORING (1-5 stars):
+   ★☆☆☆☆ - Junk
+   ★★☆☆☆ - Very poor
+   ★★★☆☆ - Barely acceptable
+   ★★★★☆ - Good
+   ★★★★★ - Outstanding
+
+4. RECOMMENDATIONS:
+   [REQUIRED] - Critical changes needed for acceptance
+   [OPTIONAL] - Suggested improvements""",
+            
+            "moderator": """As a senior moderator, analyze the complete review discussion:
+
+1. REVIEW SYNTHESIS:
+   - Key agreements
+   - Points of contention
+   - Critical recommendations
+
+2. DECISION FRAMEWORK:
+   - Essential revisions
+   - Secondary improvements
+   - Publication readiness
+
+3. FINAL RECOMMENDATION:
+   - Accept/Revise/Reject
+   - Required changes
+   - Timeline expectations"""
+        },
+        
+        "Grant Proposal": {
+            "reviewer": """Evaluate this grant proposal using NIH criteria:
+
+1. SIGNIFICANCE (Score 1-9):
+   - Scientific premise
+   - Impact potential
+   - Field advancement
+
+2. INNOVATION (Score 1-9):
+   - Novel concepts
+   - Methodology advances
+   - Technical innovation
+
+3. APPROACH (Score 1-9):
+   - Methodology soundness
+   - Timeline feasibility
+   - Risk management
+
+4. OVERALL IMPACT (Score 1-9):
+   - Potential influence
+   - Success likelihood
+   - Resource justification""",
+            
+            "moderator": """Synthesize grant reviews focusing on:
+
+1. SCIENTIFIC MERIT:
+   - Impact potential
+   - Innovation level
+   - Methodology strength
+
+2. FEASIBILITY:
+   - Resource availability
+   - Timeline realism
+   - Risk assessment
+
+3. FUNDING RECOMMENDATION:
+   - Priority level
+   - Required modifications
+   - Support justification"""
+        },
+        
+        "Poster": {
+            "reviewer": """Assess this scientific poster considering:
+
+1. VISUAL PRESENTATION:
+   - Layout effectiveness
+   - Graphics quality
+   - Text readability
+
+2. CONTENT QUALITY:
+   - Scientific accuracy
+   - Data presentation
+   - Methods clarity
+
+3. SCORING (1-5 stars):
+   - Visual Design
+   - Content Quality
+   - Technical Merit""",
+            
+            "moderator": """Evaluate poster presentation focusing on:
+
+1. COMMUNICATION EFFECTIVENESS:
+   - Visual impact
+   - Message clarity
+   - Technical accuracy
+
+2. IMPROVEMENTS:
+   - Critical revisions
+   - Enhancement suggestions
+   - Presentation tips"""
+        }
+    }
+
 class ReviewPersistenceManager:
     def __init__(self, storage_dir: str = "data/reviews"):
         """Initialize the review persistence manager."""
@@ -1635,7 +1775,7 @@ def main():
                     # Process review
                     process_review(uploaded_file)
                     
-                except Exception as e:
+                except Exception as e:except Exception as e:
                     st.error(f"Error during review process: {str(e)}")
                     if debug_mode:
                         st.exception(e)
