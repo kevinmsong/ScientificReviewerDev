@@ -995,13 +995,6 @@ def show_configuration_tab():
         key="document_upload"
     )
 
-    if uploaded_file:
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            st.success(f"✅ {uploaded_file.name} uploaded successfully")
-        with col2:
-            st.info(f"Size: {uploaded_file.size / 1024:.1f} KB")
-
     # Reviewer Configuration Section
     st.markdown('<h2 class="section-header">Reviewer Configuration</h2>', unsafe_allow_html=True)
 
@@ -1890,7 +1883,7 @@ def main_content():
             # Debug mode checkbox
             debug_mode = st.checkbox(
                 "Debug Mode",
-                value=st.session_state.debug_mode,
+                value=st.session_state.debug_mode,value=st.session_state.debug_mode,
                 key="debug_checkbox"
             )
             st.session_state.debug_mode = debug_mode
