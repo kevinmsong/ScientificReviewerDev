@@ -975,17 +975,16 @@ def show_configuration_tab():
     num_iterations = st.number_input("Number of Discussion Iterations", min_value=1, max_value=5, value=default_settings['iterations'], help="Number of rounds of discussion between reviewers")
 
     st.markdown("### Review Actions")
-    can_generate = uploaded_file and 'review_config' in st.session_state
+    can_generate = uploaded_file
     if st.button("🚀 Generate Review", key="generate_review", disabled=not can_generate):
         if not uploaded_file: st.error("❌ Please upload a PDF file first.")
-        elif 'review_config' not in st.session_state:
-            st.error("❌ Please complete the configuration first.")
         else:
-            try:
-                process_review(uploaded_file, int(num_reviewers))
-            except Exception as e:
-                st.error(f"❌ Error during review process: {str(e)}")
-                if st.session_state.get('debug_mode', False): st.exception(e)
+            st.session_state.review_config = {
+                "document_type": doc_type, "venue": venue, "rating_system": rating_system, "is_nih_grant": is_nih_grant,
+                "reviewers": reviewer_config, "num_iterations": num_iterations, "bias": st.session_state.bias, "temperature": st.session_state.temperature
+            }
+            st.success("✅ Configuration saved successfully!")
+            with st.spinner("📊 Processing review..."): process_review(uploaded_file, int(num_reviewers))
 
     if 'current_review' in st.session_state:
         with st.expander("Current Review Status", expanded=True): display_review_results(st.session_state.current_review)
@@ -1734,7 +1733,7 @@ def main_content():
             "Reviewer Bias",
             min_value=-2,
             max_value=2,
-            value=st.session_state.bias,
+            value=st.session_state.bias,page_icon="📝",
             help="""
             -2: Extremely negative and biased
             -1: Somewhat negative and biased
