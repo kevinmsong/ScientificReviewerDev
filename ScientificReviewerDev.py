@@ -1517,30 +1517,29 @@ def extract_all_scores(results: Dict[str, Any]) -> Dict[str, Any]:
 
 def display_review_results(results: Dict[str, Any]):
     """Display review results with enhanced formatting and visualization."""
-    st.markdown('<h2 class="section-header">Review Results</h2>', unsafe_allow_html=True)
-    
+    st.markdown('<h2 class="main-header">Review Results</h2>', unsafe_allow_html=True)
+
     # Overview metrics
-    with st.container():
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            display_score_summary(results)
-        
-        with col2:
-            display_consensus_metrics(results)
-        
-        with col3:
-            display_reviewer_agreement(results)
-    
+    st.markdown('<div class="row">', unsafe_allow_html=True)
+    col1, col2, col3 = st.columns(3, gap="large")
+    with col1:
+        display_score_summary(results)
+    with col2:
+        display_consensus_metrics(results)
+    with col3:
+        display_reviewer_agreement(results)
+    st.markdown('</div>', unsafe_allow_html=True)
+
     # Detailed results by iteration
     for i, iteration in enumerate(results['iterations'], 1):
-        with st.expander(f"Iteration {i}", expanded=True):
+        with st.container():
+            st.markdown(f"<h3>Iteration {i}</h3>", unsafe_allow_html=True)
             display_iteration_results(iteration)
-    
+
     # Moderator analysis
     if results.get('moderation'):
-        with st.expander("Moderator Analysis", expanded=True):
-            display_moderation_results(results['moderation'])
+        st.markdown('<h3>Moderator Analysis</h3>', unsafe_allow_html=True)
+        display_moderation_results(results['moderation'])
 
 def display_score_summary(results: Dict[str, Any]):
     """Display summary of scores across all reviews."""
