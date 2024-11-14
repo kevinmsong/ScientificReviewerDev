@@ -1863,14 +1863,16 @@ def extract_scores_from_review(review_text: str) -> Dict[str, Union[float, str]]
 
 def initialize_session_state():
     """Initialize session state variables with default values."""
-    if 'bias' not in st.session_state:
-        st.session_state.bias = 0
-    if 'temperature' not in st.session_state:
-        st.session_state.temperature = 0.1
-    if 'debug_mode' not in st.session_state:
-        st.session_state.debug_mode = False
-    if 'num_reviewers' not in st.session_state:
-        st.session_state.num_reviewers = 4
+    default_values = {
+        'bias': 0,
+        'temperature': 0.1,
+        'debug_mode': False,
+        'num_reviewers': 4
+    }
+    
+    for key, default_value in default_values.items():
+        if key not in st.session_state:
+            st.session_state[key] = default_value
 
 def main_content():
     """Main application content."""
@@ -1907,6 +1909,7 @@ def main_content():
         
         # Advanced settings
         with st.expander("Advanced Settings", expanded=False):
+            # Temperature slider
             st.session_state.temperature = st.slider(
                 "Model Temperature",
                 min_value=0.0,
@@ -1916,11 +1919,13 @@ def main_content():
                 help="Controls randomness in model responses"
             )
             
-            st.session_state.debug_mode = st.checkbox(
-                "Debug Mode","Debug Mode",
+            # Debug mode checkbox
+            debug_mode = st.checkbox(
+                "Debug Mode",
                 value=st.session_state.debug_mode,
-                help="Show detailed logging information"
+                key="debug_checkbox"key="debug_checkbox"
             )
+            st.session_state.debug_mode = debug_mode
     
     # Main content area with tabs
     tab1, tab2 = st.tabs(["Configure & Review", "Review History"])
