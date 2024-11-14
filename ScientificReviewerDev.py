@@ -3,7 +3,7 @@ import streamlit as st
 # Must be the first Streamlit command
 st.set_page_config(
     page_title="Multi-Agent Scientific Review System",
-    page_icon="📝",
+    page_icon="📝",page_icon="📝",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -1917,7 +1917,7 @@ def main_content():
             # Debug mode checkbox
             debug_mode = st.checkbox(
                 "Debug Mode",
-                value=st.session_state.debug_mode,value=st.session_state.debug_mode,
+                value=st.session_state.debug_mode,
                 key="debug_checkbox"
             )
             st.session_state.debug_mode = debug_mode
