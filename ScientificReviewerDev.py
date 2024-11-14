@@ -1768,7 +1768,7 @@ def main_content():
             )
     
     # Main content tabs
-    tab1, tab2, tab3 = st.tabs(["New Review", "Active Reviews", "History"])tab1, tab2, tab3 = st.tabs(["New Review", "Active Reviews", "History"])
+    tab1, tab2, tab3 = st.tabs(["New Review", "Active Reviews", "History"])
     
     with tab1:
         show_configuration_tab()
