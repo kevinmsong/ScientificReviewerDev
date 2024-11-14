@@ -1053,26 +1053,49 @@ def show_review_process_tab():
         st.warning("Please complete the configuration first.")
         return
     
-    # File upload
+    # File upload area with additional information
+    st.markdown("""
+    <style>
+    .upload-box {
+        border: 2px dashed #4CAF50;
+        border-radius: 10px;
+        padding: 2rem;
+        text-align: center;
+        margin: 1rem 0;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    st.markdown('<div class="upload-box">', unsafe_allow_html=True)
+    
     uploaded_file = st.file_uploader(
         f"Upload {st.session_state.review_config['document_type']} (PDF)",
         type=["pdf"],
-        key="uploaded_file"
+        key="uploaded_file",
+        help="Upload a PDF document for review. The system will extract text and figures for analysis."
     )
+    
+    if uploaded_file is not None:
+        file_details = {
+            "Filename": uploaded_file.name,
+            "FileType": uploaded_file.type,
+            "FileSize": f"{uploaded_file.size / 1024:.2f} KB"
+        }
+        st.write("File Details:", file_details)
+    
+    st.markdown('</div>', unsafe_allow_html=True)
     
     if uploaded_file is None:
         st.info("Please upload a document to begin the review process.")
         return
     
+    # Configuration summary
+    with st.expander("Review Configuration Summary", expanded=False):
+        st.json(st.session_state.review_config)
+    
     # Start review button
     if st.button("Start Review Process", disabled=not uploaded_file):
-        with st.spinner("Processing review..."):
-            try:
-                process_review(uploaded_file)
-            except Exception as e:
-                st.error(f"Error during review process: {str(e)}")
-                if st.session_state.get('debug_mode', False):
-                    st.exception(e)
+        process_review(uploaded_file)
 
 def show_history_tab():
     """Display the review history tab."""
@@ -1157,6 +1180,73 @@ def show_review_details(review: Dict[str, Any]):
             mime="text/markdown"
         )
 
+def extract_pdf_content(pdf_file) -> Tuple[str, List[Image.Image], Dict[str, Any]]:
+    """Extract text, images, and metadata from a PDF file."""
+    try:
+        pdf_document = fitz.open(stream=pdf_file.read(), filetype="pdf")
+        text_content = ""
+        images = []
+        metadata = {
+            'title': pdf_document.metadata.get('title', 'Untitled'),
+            'author': pdf_document.metadata.get('author', 'Unknown'),
+            'total_pages': len(pdf_document),
+            'sections': []
+        }
+        
+        # Extract section headers and content structure
+        current_section = "Introduction"
+        section_content = []
+        
+        for page_num, page in enumerate(pdf_document):
+            # Extract text with formatting
+            text = page.get_text("dict")
+            blocks = text.get('blocks', [])
+            
+            for block in blocks:
+                if block.get('type') == 0:  # Text block
+                    font_size = block.get('size', 0)
+                    font_flags = block.get('flags', 0)
+                    text = block.get('text', '').strip()
+                    
+                    # Try to identify section headers
+                    if font_size > 12 or font_flags & 16:  # Larger text or bold
+                        if any(keyword in text.lower() for keyword in 
+                              ['introduction', 'methods', 'results', 'discussion', 
+                               'conclusion', 'abstract', 'background', 'materials']):
+                            if section_content:
+                                metadata['sections'].append({
+                                    'title': current_section,
+                                    'content_length': len('\n'.join(section_content))
+                                })
+                            current_section = text
+                            section_content = []
+                            continue
+                    
+                    section_content.append(text)
+                    text_content += text + "\n"
+            
+            # Extract images
+            for img in page.get_images():
+                try:
+                    xref = img[0]
+                    base_image = pdf_document.extract_image(xref)
+                    image_bytes = base_image["image"]
+                    image = Image.open(io.BytesIO(image_bytes))
+                    images.append(image)
+                except Exception as e:
+                    logging.warning(f"Failed to extract image: {e}")
+        
+        # Add final section
+        if section_content:
+            metadata['sections'].append({
+                'title': current_section,
+                'content_length': len('\n'.join(section_content))
+            })
+        
+        return text_content.strip(), images, metadata
+        
+    except Exception as e:
+        raise Exception(f"Error processing PDF: {str(e)}")
 
 def process_review(uploaded_file):
     """Process the review with current configuration."""
@@ -1164,31 +1254,111 @@ def process_review(uploaded_file):
         config = st.session_state.review_config
         
         # Extract content from PDF
-        content = extract_pdf_content(uploaded_file)[0]
+        with st.spinner("Extracting content from PDF..."):
+            text_content, images, metadata = extract_pdf_content(uploaded_file)
+            
+            # Display document overview
+            st.markdown("### Document Overview")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.write(f"Title: {metadata['title']}")
+                st.write(f"Author: {metadata['author']}")
+                st.write(f"Pages: {metadata['total_pages']}")
+            
+            with col2:
+                st.write("Sections:")
+                for section in metadata['sections']:
+                    st.write(f"- {section['title']}")
+            
+            if images:
+                st.write(f"Found {len(images)} figures/images")
+        
+        # Create enhanced prompt with document metadata
+        document_context = f"""Document Information:
+Title: {metadata['title']}
+Author: {metadata['author']}
+Length: {metadata['total_pages']} pages
+
+Document Structure:
+{chr(10).join([f"- {section['title']}" for section in metadata['sections']])}
+
+Review Context:
+- Venue: {config['venue']}
+- Document Type: {config['document_type']}
+- Rating System: {config['rating_system']}
+"""
         
         # Create agents
-        agents = create_review_agents(
-            num_reviewers=len(config['reviewers']),
-            review_type=config['document_type'].lower(),
-            include_moderator=len(config['reviewers']) > 1
-        )
+        with st.spinner("Initializing review agents..."):
+            agents = create_review_agents(
+                num_reviewers=len(config['reviewers']),
+                review_type=config['document_type'].lower(),
+                include_moderator=len(config['reviewers']) > 1
+            )
         
-        # Process review
+        # Create enhanced prompts
+        review_prompts = []
+        for reviewer_id, reviewer_info in config['reviewers'].items():
+            base_prompt = reviewer_info['prompt']
+            expertise = reviewer_info['expertise']
+            
+            enhanced_prompt = f"""Document Context:
+{document_context}
+
+Reviewer Expertise: {expertise}
+Bias Level: {config['bias']} (-2 extremely critical to +2 extremely positive)
+
+{base_prompt}
+
+Please provide a detailed review following the above structure. For papers, provide specific section-by-section analysis and change suggestions.
+"""
+            review_prompts.append(enhanced_prompt)
+        
+        # Process review with progress tracking
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        def update_progress(progress, status):
+            progress_bar.progress(int(progress))
+            status_text.text(status)
+        
         results = st.session_state.review_processor.process_review(
-            content=content,
+            content=text_content,
             agents=agents,
             expertises=[r['expertise'] for r in config['reviewers'].values()],
-            custom_prompts=[r['prompt'] for r in config['reviewers'].values()],
+            custom_prompts=review_prompts,
             review_type=config['document_type'].lower(),
             venue=config['venue'],
-            num_iterations=config['num_iterations']
+            num_iterations=config['num_iterations'],
+            progress_callback=update_progress
         )
         
+        # Save results
+        st.session_state.current_review = results
+        
+        # Store additional metadata
+        results['document_metadata'] = metadata
+        results['config'] = config
+        
         # Display results
+        st.success("Review completed successfully!")
         display_review_results(results)
         
+        # Offer download
+        if st.button("Download Review Report"):
+            report_content = generate_review_report(results)
+            st.download_button(
+                label="Download Report",
+                data=report_content,
+                file_name=f"review_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md",
+                mime="text/markdown"
+            )
+        
     except Exception as e:
-        raise Exception(f"Error processing review: {str(e)}")
+        st.error(f"Error processing review: {str(e)}")
+        if st.session_state.get('debug_mode', False):
+            st.exception(e)
+        raise
 
 def display_review_results(results: Dict[str, Any]):
     """Display review results with enhanced formatting and visualization."""
@@ -1600,7 +1770,7 @@ def main_content():
     # Main content tabs
     tab1, tab2, tab3 = st.tabs(["New Review", "Active Reviews", "History"])
     
-    with tab1:
+    with tab1:with tab1:
         show_configuration_tab()
     
     with tab2:
