@@ -1106,7 +1106,7 @@ def process_review(uploaded_file):
             
             # Document Overview spanning full width
             st.markdown("## Document Overview")
-            st.markdown(f"""
+            st.write(f"""
             - **Title:** {metadata['title']}
             - **Author:** {metadata['author']}
             - **Type:** {config['document_type']}
@@ -1114,7 +1114,7 @@ def process_review(uploaded_file):
             - **Pages:** {metadata['total_pages']}
             - **Number of Figures:** {len(images)}
             - **Number of Sections:** {len(metadata['sections'])}
-            """)
+            """, unsafe_allow_html=True)
             
             # Section Analysis
             st.markdown("### Section Structure")
@@ -1917,7 +1917,7 @@ def main_content():
             # Debug mode checkbox
             debug_mode = st.checkbox(
                 "Debug Mode",
-                value=st.session_state.debug_mode,
+                value=st.session_state.debug_mode,value=st.session_state.debug_mode,
                 key="debug_checkbox"
             )
             st.session_state.debug_mode = debug_mode
