@@ -8,7 +8,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-import loggingimport logging
+import logging
 from openai import OpenAI
 from langchain_openai import ChatOpenAI
 from langchain.schema import HumanMessage
