@@ -963,8 +963,9 @@ def show_configuration_tab():
         with col2: st.info(f"Size: {uploaded_file.size / 1024:.1f} KB")
 
     st.markdown('<h2 class="section-header">Reviewer Configuration</h2>', unsafe_allow_html=True)
+    num_reviewers = st.number_input("Number of Reviewers", min_value=1, max_value=10, value=default_settings['reviewers'], step=1, key="num_reviewers")
     reviewer_config = {}
-    for i in range(st.session_state.num_reviewers):
+    for i in range(int(num_reviewers)):
         with st.expander(f"Reviewer {i+1} Configuration", expanded=True):
             col1, col2 = st.columns(2)
             with col1: expertise = st.text_input("Expertise", value=f"Scientific Expert {i+1}", key=f"expertise_{i}")
@@ -974,21 +975,22 @@ def show_configuration_tab():
     num_iterations = st.number_input("Number of Discussion Iterations", min_value=1, max_value=5, value=default_settings['iterations'], help="Number of rounds of discussion between reviewers")
 
     st.markdown("### Review Actions")
-    can_generate = uploaded_file
+    can_generate = uploaded_file and 'review_config' in st.session_state
     if st.button("🚀 Generate Review", key="generate_review", disabled=not can_generate):
         if not uploaded_file: st.error("❌ Please upload a PDF file first.")
+        elif 'review_config' not in st.session_state:
+            st.error("❌ Please complete the configuration first.")
         else:
-            st.session_state.review_config = {
-                "document_type": doc_type, "venue": venue, "rating_system": rating_system, "is_nih_grant": is_nih_grant,
-                "reviewers": reviewer_config, "num_iterations": num_iterations, "bias": st.session_state.bias, "temperature": st.session_state.temperature
-            }
-            st.success("✅ Configuration saved successfully!")
-            with st.spinner("📊 Processing review..."): process_review(uploaded_file)
+            try:
+                process_review(uploaded_file, int(num_reviewers))
+            except Exception as e:
+                st.error(f"❌ Error during review process: {str(e)}")
+                if st.session_state.get('debug_mode', False): st.exception(e)
 
     if 'current_review' in st.session_state:
         with st.expander("Current Review Status", expanded=True): display_review_results(st.session_state.current_review)
 
-def process_review(uploaded_file):
+def process_review(uploaded_file, num_reviewers):
     try:
         config = st.session_state.review_config
         with st.spinner("Extracting content from PDF..."):
@@ -1016,7 +1018,7 @@ def process_review(uploaded_file):
                 st.image(img, caption=f"Figure {idx+1}", use_container_width=True)
 
         with st.spinner("Initializing review agents..."):
-            agents = create_review_agents(n_agents=len(config['reviewers']), review_type=config['document_type'].lower(), include_moderator=len(config['reviewers']) > 1)
+            agents = create_review_agents(n_agents=num_reviewers, review_type=config['document_type'].lower(), include_moderator=num_reviewers > 1)
 
         progress_container = st.container()
         with progress_container:
@@ -1758,10 +1760,10 @@ def main_content():
                 help="Controls randomness in model responses"
             )
             
-            # Debug mode checkbox# Debug mode checkbox
+            # Debug mode checkbox
             debug_mode = st.checkbox(
                 "Debug Mode",
-                value=st.session_state.debug_mode,
+                value=st.session_state.debug_mode,value=st.session_state.debug_mode,
                 key="debug_checkbox"
             )
             st.session_state.debug_mode = debug_mode
