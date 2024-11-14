@@ -12,7 +12,7 @@ def display_review_results(results: Dict[str, Any]):
         with col2:
             display_consensus_metrics(results)
         
-        with col3:with col3:
+        with col3:
             display_reviewer_agreement(results)
 
     # Detailed results by iteration
