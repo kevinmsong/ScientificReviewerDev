@@ -1733,7 +1733,7 @@ def main_content():
             "Reviewer Bias",
             min_value=-2,
             max_value=2,
-            value=st.session_state.bias,page_icon="📝",
+            value=st.session_state.bias,
             help="""
             -2: Extremely negative and biased
             -1: Somewhat negative and biased
