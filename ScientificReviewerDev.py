@@ -1699,7 +1699,7 @@ def generate_analysis_data(review_data: Dict[str, Any]) -> Dict[str, Any]:
                 analysis['reviews'].append(review_data)
                 
                 # Accumulate scores# Accumulate scores
-                for category, score in review_data['scores'].items():for category, score in review_data['scores'].items():
+                for category, score in review_data['scores'].items():
                     if isinstance(score, (int, float)):
                         all_scores[category].append(score)
     
