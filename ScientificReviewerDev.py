@@ -1512,19 +1512,18 @@ def display_iteration_results(iteration: Dict[str, Any]):
             st.error(f"Error in review by {review['expertise']}: {review.get('error', 'Unknown error')}")
 
 def display_moderation_results(moderation: str):
-    """Display moderator analysis with enhanced formatting."""
+    """Display moderator analysis with enhanced formatting.""""""Display moderator analysis with enhanced formatting."""
     sections = split_moderation_sections(moderation)
     
-    # Display overall recommendation first
-    if 'Final Assessment' in sections:
-        st.markdown("### Final Assessment")
-        st.markdown(sections['Final Assessment'])
-    
-    # Display other sections
-    for title, content in sections.items():
-        if title != 'Final Assessment':
-            with st.expander(title, expanded=True):
+    # Display sections using tabs
+    if sections:
+        section_tabs = st.tabs(list(sections.keys()))
+        for tab, (title, content) in zip(section_tabs, sections.items()):
+            with tab:
                 st.markdown(content)
+    else:else:
+        # If no sections found, display full text
+        st.markdown(moderation)
 
 def analyze_reviewer_agreement(results: Dict[str, Any]) -> Dict[str, Any]:
     """Analyze agreement and disagreement between reviewers."""
@@ -1788,7 +1787,7 @@ def main_content():
     tab1, tab2 = st.tabs(["Configure & Review", "Review History"])
     
     with tab1:
-        show_configuration_tab()
+        show_configuration_tab()show_configuration_tab()
     
     with tab2:
         show_history_tab()
