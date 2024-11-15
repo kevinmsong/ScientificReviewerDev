@@ -1483,26 +1483,27 @@ def display_iteration_results(iteration: Dict[str, Any]):
     """Display results from a single iteration."""
     for review in iteration['reviews']:
         if review.get('success', False):
-            with st.container():
-                st.markdown(f"### Review by {review['expertise']}")
-                
-                # Extract and display scores
-                scores = extract_scores_from_review(review['review_text'])
-                if scores:
-                    st.markdown("#### Scores")
-                    cols = st.columns(len(scores))
-                    for col, (category, score) in zip(cols, scores.items()):
-                        with col:
-                            display_score(category, score)
-                
-                # Display main review content
-                sections = split_review_sections(review['review_text'])
-                for section_title, content in sections.items():
-                    with st.expander(section_title, expanded=True):
+            st.markdown(f"### Review by {review['expertise']}")
+            
+            # Extract and display scores
+            scores = extract_scores_from_review(review['review_text'])
+            if scores:
+                st.markdown("#### Scores")
+                cols = st.columns(len(scores))
+                for col, (category, score) in zip(cols, scores.items()):
+                    with col:
+                        display_score(category, score)
+            
+            # Display main review content using tabs instead of nested expanders
+            sections = split_review_sections(review['review_text'])
+            if sections:
+                section_tabs = st.tabs(list(sections.keys()))
+                for tab, (section_title, content) in zip(section_tabs, sections.items()):
+                    with tab:
                         st.markdown(content)
-                
-                # Display metadata
-                st.markdown(f"*Reviewed at: {review['timestamp']}*")
+            
+            st.markdown(f"*Reviewed at: {review['timestamp']}*")
+            st.markdown("---")
         else:
             st.error(f"Error in review by {review['expertise']}: {review.get('error', 'Unknown error')}")
 
