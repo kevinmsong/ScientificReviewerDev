@@ -1432,33 +1432,55 @@ def display_score_summary(results: Dict[str, Any]):
     else:
         st.info("No numerical scores found in reviews.")
 
+def extract_points_by_type(text: str, markers: List[str]) -> Set[str]:
+    """Extract points of a specific type from review text."""
+    points = set()
+    
+    # Create pattern for the markers
+    marker_pattern = '|'.join(map(re.escape, markers))
+    pattern = rf"(?:{marker_pattern})[:\s]+([^•\n]+)"
+    
+    matches = re.finditer(pattern, text, re.IGNORECASE | re.MULTILINE)
+    for match in matches:
+        point = match.group(1).strip()
+        if point:
+            points.add(point)
+    
+    return points
+
 def display_consensus_metrics(results: Dict[str, Any]):
     """Display metrics about reviewer consensus and agreement."""
     st.markdown("### Consensus Analysis")
     
-    # Analyze key points across reviews
-    key_points = defaultdict(int)
-    for iteration in results['iterations']:
-        for review in iteration['reviews']:
+    # Extract and normalize points
+    consensus_points = defaultdict(set)
+    for iteration in results.get('iterations', []):
+        for review in iteration.get('reviews', []):
             if review.get('success', False):
-                points = extract_key_points(review['review_text'])
-                for point in points:
-                    key_points[point.lower()] += 1
+                text = review.get('review_text', '')
+                
+                # Extract different types of points
+                required = extract_points_by_type(text, ['required', '[required]', 'REQUIRED'])
+                optional = extract_points_by_type(text, ['optional', '[optional]', 'OPTIONAL'])
+                
+                for point in required:
+                    consensus_points['required'].add(point)
+                for point in optional:
+                    consensus_points['optional'].add(point)
     
-    # Display top consensus points
-    if key_points:
+    # Display consensus points
+    if consensus_points:
         st.markdown("#### Top Consensus Points")
-        sorted_points = sorted(key_points.items(), key=lambda x: x[1], reverse=True)[:5]
-        for point, count in sorted_points:
-            st.markdown(f"- {point} ({count} mentions)")
-    else:
-        st.info("No consensus points identified.")
+        for point_type, points in consensus_points.items():
+            for point in points:
+                point_display = point.strip()
+                if point_display:
+                    st.markdown(f"* **{point_type}**: {point_display}")
 
 def display_reviewer_agreement(results: Dict[str, Any]):
     """Display analysis of reviewer agreement and disagreement."""
     st.markdown("### Reviewer Agreement")
     
-    # Calculate agreement metrics directly from iterations
     agreement_level, agreements, disagreements = calculate_agreement_level(results.get('iterations', []))
     
     st.metric(
@@ -1470,13 +1492,13 @@ def display_reviewer_agreement(results: Dict[str, Any]):
     col1, col2 = st.columns(2)
     with col1:
         st.markdown("#### Key Agreements")
-        for point in agreements[:3]:  # Show top 3
+        for point in agreements:
             st.markdown(f"* {point}")
     
     with col2:
         st.markdown("#### Key Disagreements")
-        for point in disagreements[:3]:  # Show top 3
-            st.markdown(f"* {point}")
+        for point in disagreements:
+            st.markdown(f"* {point}")st.markdown(f"* {point}")
 
 def display_iteration_results(iteration: Dict[str, Any]):
     """Display results from a single iteration.""""""Display results from a single iteration."""
@@ -1548,40 +1570,41 @@ def analyze_reviewer_agreement(results: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 def calculate_agreement_level(iterations: List[Dict[str, Any]]) -> Tuple[float, List[str], List[str]]:
-    """Calculate review agreement metrics."""
-    all_points = defaultdict(int)
-    total_reviewers = 0
+    """Calculate reviewer agreement with improved point matching."""
+    point_occurrences = defaultdict(int)
+    reviewer_count = 0
     
-    # Count occurrences of each point across all reviews
     for iteration in iterations:
-        if not isinstance(iteration, dict):
-            continue
-            
         for review in iteration.get('reviews', []):
             if review.get('success', False):
-                total_reviewers += 1
-                points = extract_key_points(review.get('review_text', ''))
-                for point in points:
-                    point_key = point.lower().strip()
-                    all_points[point_key] += 1
+                reviewer_count += 1
+                text = review.get('review_text', '')
+                
+                # Extract both required and optional points
+                all_points = extract_points_by_type(text, ['required', '[required]', 'REQUIRED'])
+                all_points.update(extract_points_by_type(text, ['optional', '[optional]', 'OPTIONAL']))
+                
+                for point in all_points:
+                    normalized_point = point.lower().strip()
+                    point_occurrences[normalized_point] += 1
     
+    if reviewer_count == 0:
+        return 0.0, [], []
+    
+    # Calculate agreements and disagreements
+    threshold = reviewer_count / 2
     agreements = []
     disagreements = []
     
-    if total_reviewers > 0:
-        threshold = total_reviewers / 2
-        for point, count in all_points.items():
-            if count > threshold:
-                agreements.append(point)
-            else:
-                disagreements.append(point)
-        
-        if agreements or disagreements:
-            agreement_level = (len(agreements) / (len(agreements) + len(disagreements))) * 100
+    for point, count in point_occurrences.items():
+        if count > threshold:
+            agreements.append(point)
         else:
-            agreement_level = 0.0
-    else:
-        agreement_level = 0.0
+            disagreements.append(point)
+    
+    # Calculate agreement level
+    total_points = len(agreements) + len(disagreements)
+    agreement_level = (len(agreements) / total_points * 100) if total_points > 0 else 0.0
     
     return agreement_level, agreements, disagreements
 
