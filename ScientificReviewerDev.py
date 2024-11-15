@@ -103,6 +103,54 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
+def _validate_review_structure(self, review_text: str) -> bool:
+    """Validate that review contains required sections."""
+    required_sections = [
+        'SECTION-BY-SECTION ANALYSIS',
+        'OVERALL ASSESSMENT',
+        'SCORING',
+        'RECOMMENDATIONS'
+    ]
+    return all(section in review_text for section in required_sections)
+
+def _fix_review_structure(self, review_text: str) -> str:
+    """Add missing sections to maintain consistent structure."""
+    sections = extract_review_sections(review_text)
+    
+    fixed_text = "SECTION-BY-SECTION ANALYSIS:\n"
+    if 'analysis' in sections:
+        fixed_text += '\n'.join(sections['analysis']) + '\n\n'
+        
+    fixed_text += "OVERALL ASSESSMENT:\n"
+    if 'assessment' in sections:
+        fixed_text += '\n'.join(sections['assessment']) + '\n\n'
+        
+    fixed_text += "SCORING:\n"
+    if 'scoring' in sections:
+        fixed_text += '\n'.join(sections['scoring']) + '\n\n'
+    else:
+        fixed_text += "No scores provided\n\n"
+        
+    fixed_text += "RECOMMENDATIONS:\n"
+    if 'recommendations' in sections:
+        fixed_text += '\n'.join(sections['recommendations'])
+    
+    return fixed_text
+
+def _merge_review_chunks(self, chunks: List[str]) -> str:
+    """Merge review chunks maintaining section structure."""
+    merged_sections = defaultdict(list)
+    
+    for chunk in chunks:
+        sections = extract_review_sections(chunk)
+        for section, content in sections.items():
+            merged_sections[section].extend(content)
+    
+    return self._fix_review_structure('\n\n'.join(
+        f"{section}:\n" + '\n'.join(content) 
+        for section, content in merged_sections.items()
+    ))
+
 # Add this function after the imports and before any other functions
 def get_default_prompts() -> Dict[str, Dict[str, str]]:
     """Get default prompts for different document types and reviewer roles."""
@@ -846,22 +894,63 @@ Please provide specific examples from the discussion to support your analysis.""
         
         return prompt
 
-def process_single_review(review_text: str) -> Dict[str, Any]:
-    """Process a single review into structured data."""
-    sections = extract_review_sections(review_text)
-    scores = extract_scores(sections)
-    recommendations = extract_recommendations(sections)
-    
-    analysis_sections = {
-        key: content for key, content in sections.items() 
-        if key.startswith('analysis_')
-    }
-    
-    return {
-        'scores': scores,
-        'recommendations': recommendations,
-        'analysis': analysis_sections
-    }
+def process_single_review(self, agent: ChatOpenAI, content_chunks: List[str], prompt: str, expertise: str) -> str:
+    """Process review with strict formatting."""
+    structured_prompt = f"""You MUST use this exact structure in your review:
+1. SECTION-BY-SECTION ANALYSIS:
+   For each section (Introduction, Methods, Results, Discussion):
+   - Current content summary
+   - Required changes marked as [REQUIRED]
+   - Optional improvements marked as [OPTIONAL]
+   - Line-specific edits
+
+2. OVERALL ASSESSMENT:
+   - Scientific Merit: [Score using ★★★★☆ format]
+   - Technical Quality: [Score using ★★★★☆ format]
+   - Presentation: [Score using ★★★★☆ format]
+   - Impact: [Score using ★★★★☆ format]
+
+3. RECOMMENDATIONS:
+   - Mark critical changes as [REQUIRED]
+   - Mark suggestions as [OPTIONAL]
+
+Review the following content:
+{prompt}"""
+
+    responses = []
+    for i, chunk in enumerate(content_chunks):
+        try:
+            response = agent.invoke([HumanMessage(content=f"{structured_prompt}\n\nContent chunk {i+1}/{len(content_chunks)}:\n{chunk}")])
+            review = self.extract_content(response)
+            if self._validate_review_structure(review):
+                responses.append(review)
+            else:
+                fixed_review = self._fix_review_structure(review)
+                responses.append(fixed_review)
+        except Exception as e:
+            logging.error(f"Error processing chunk {i+1}: {e}")
+            continue
+
+    if not responses:
+        raise Exception("No valid reviews generated")
+
+    if len(responses) > 1:
+        # Generate final consolidated review
+        compilation_prompt = f"""{structured_prompt}
+
+Consolidate these reviews into a single coherent review while maintaining the exact structure:
+
+{' '.join(responses)}"""
+        
+        try:
+            final = agent.invoke([HumanMessage(content=compilation_prompt)])
+            review = self.extract_content(final)
+            return self._fix_review_structure(review)
+        except Exception as e:
+            logging.error(f"Error merging reviews: {e}")
+            return self._merge_review_chunks(responses)
+            
+    return responses[0]
 
 def initialize_review_settings():
     """Initialize default review settings based on document type."""
@@ -1388,26 +1477,39 @@ def display_document_analysis(metadata: Dict[str, Any], images: List[Image.Image
                 use_container_width=True  # Updated parameter
             )
 
-def extract_all_scores(results: Dict[str, Any]) -> Dict[str, Any]:
-    """Extract all scores from review results."""
+def extract_all_scores(results: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    """Extract and aggregate all scores from reviews."""
     scores = {
         'overall': {},
         'by_reviewer': {},
         'by_category': defaultdict(list)
     }
     
-    for iteration in results['iterations']:
-        for review in iteration['reviews']:
-            if review.get('success', False):
-                reviewer_scores = extract_scores_from_review(review['review_text'])
+    for iteration in results.get('iterations', []):
+        for review in iteration.get('reviews', []):
+            if review.get('success'):
+                reviewer_scores = extract_scores_from_review(review.get('review_text', ''))
                 scores['by_reviewer'][review['expertise']] = reviewer_scores
                 
                 for category, score in reviewer_scores.items():
-                    scores['by_category'][category].append(score)
+                    if isinstance(score, str) and '★' in score:
+                        num_score = score.count('★')
+                    else:
+                        try:
+                            num_score = float(score)
+                        except (ValueError, TypeError):
+                            continue
+                    scores['by_category'][category].append(num_score)
     
     # Calculate averages
     for category, category_scores in scores['by_category'].items():
-        scores['overall'][category] = sum(category_scores) / len(category_scores)
+        if category_scores:
+            avg = sum(category_scores) / len(category_scores)
+            if any(isinstance(s, str) and '★' in s for s in category_scores):
+                stars = '★' * round(avg) + '☆' * (5 - round(avg))
+                scores['overall'][category] = stars
+            else:
+                scores['overall'][category] = avg
     
     return scores
 
@@ -1576,6 +1678,63 @@ def extract_points_by_type(text: str, markers: List[str]) -> Set[str]:
             points.add(point)
     
     return points
+
+def display_review_results(results: Dict[str, Any]):
+    """Display review results with top-level tabs and proper section display."""
+    summary_tab, details_tab = st.tabs(["Summary", "Detailed Review"])
+    
+    with summary_tab:
+        # Display overall scores
+        scores = extract_all_scores(results)
+        if scores['overall']:
+            st.markdown("### Overall Scores")
+            cols = st.columns(len(scores['overall']))
+            for col, (category, score) in zip(cols, scores['overall'].items()):
+                with col:
+                    if isinstance(score, str) and '★' in score:
+                        st.markdown(f"**{category.title()}**\n\n{score}")
+                    else:
+                        st.metric(label=category.title(), value=f"{score:.1f}")
+        
+        # Display consensus points
+        consensus = extract_consensus_points(results)
+        if consensus['required'] or consensus['optional']:
+            st.markdown("### Consensus Points")
+            
+            if consensus['required']:
+                st.markdown("#### Required Changes")
+                for point, count in consensus['required'].items():
+                    st.markdown(f"- {point} ({count} reviewers)")
+            
+            if consensus['optional']:
+                st.markdown("#### Optional Improvements")
+                for point, count in consensus['optional'].items():
+                    st.markdown(f"- {point} ({count} reviewers)")
+    
+    with details_tab:
+        # Display individual reviews
+        for i, iteration in enumerate(results.get('iterations', [])):
+            st.markdown(f"### Iteration {i+1}")
+            
+            for review in iteration.get('reviews', []):
+                if review.get('success'):
+                    with st.expander(f"Review by {review['expertise']}", expanded=True):
+                        # Display review sections
+                        sections = extract_review_sections(review['review_text'])
+                        
+                        # Display scores first if present
+                        if 'scoring' in sections:
+                            st.markdown("#### Scores")
+                            for line in sections['scoring']:
+                                st.markdown(f"- {line}")
+                        
+                        # Display other sections
+                        for section, content in sections.items():
+                            if section != 'scoring':
+                                st.markdown(f"#### {section.replace('_', ' ').title()}")
+                                st.markdown('\n'.join(content))
+                        
+                        st.markdown(f"*Reviewed at: {review['timestamp']}*")
 
 def display_consensus_metrics(results: Dict[str, Any]):
     """Display metrics about reviewer consensus and agreement."""
@@ -2021,39 +2180,32 @@ def calculate_agreement_level(iterations: List[Dict[str, Any]]) -> Tuple[float, 
     return 0.0, [], []
 
 def extract_scores_from_review(review_text: str) -> Dict[str, Union[float, str]]:
-    """Extract scores with comprehensive pattern matching."""
+    """Extract scores with validation."""
+    if not review_text:
+        return {}
+        
     scores = {}
-    
-    # Expanded patterns for different score formats
     score_patterns = [
-        # Star ratings
         r'(\w+(?:\s+\w+)?)\s*(?:rating|score)?\s*:\s*([★]+(?:☆)*)',
-        # Numeric scores with denominators
-        r'(\w+(?:\s+\w+)?)\s*(?:rating|score)?\s*:\s*(\d+(?:\.\d+)?)\s*(?:/|\bof\b|\bout of\b)\s*\d+',
-        # Plain numeric scores
-        r'(\w+(?:\s+\w+)?)\s*(?:rating|score)?\s*:\s*(\d+(?:\.\d+)?)\b',
-        # NIH style scores
-        r'(\w+(?:\s+\w+)?)\s*Impact Score:\s*(\d+)',
-        r'Overall Impact:\s*(\d+)'
+        r'(\w+(?:\s+\w+)?)\s*(?:rating|score)?\s*:\s*(\d+(?:\.\d+)?)',
+        r'(\w+(?:\s+\w+)?)\s*Impact Score:\s*(\d+)'
     ]
     
-    text_blocks = re.split(r'\n{2,}', review_text)
-    for block in text_blocks:
-        for pattern in score_patterns:
-            matches = re.finditer(pattern, block, re.IGNORECASE)
-            for match in matches:
-                category = match.group(1).strip().lower()
-                score_text = match.group(2).strip()
-                
-                # Convert scores to appropriate format
-                if '★' in score_text:
-                    scores[category] = score_text
-                else:
-                    try:
-                        scores[category] = float(score_text)
-                    except ValueError:
-                        continue
-    
+    for pattern in score_patterns:
+        matches = re.finditer(pattern, review_text, re.IGNORECASE)
+        for match in matches:
+            category = match.group(1).strip().lower()
+            score = match.group(2).strip()
+            
+            # Validate and convert score
+            if '★' in score:
+                scores[category] = score
+            else:
+                try:
+                    scores[category] = float(score)
+                except ValueError:
+                    continue
+                    
     return scores
 
 def initialize_session_state():
