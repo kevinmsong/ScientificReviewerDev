@@ -1458,33 +1458,28 @@ def display_reviewer_agreement(results: Dict[str, Any]):
     """Display analysis of reviewer agreement and disagreement."""
     st.markdown("### Reviewer Agreement")
     
-    # Calculate agreement metrics
-    agreements = analyze_reviewer_agreement(results)
+    # Calculate agreement metrics directly from iterations
+    agreement_level, agreements, disagreements = calculate_agreement_level(results.get('iterations', []))
     
-    if agreements:
-        agreement_level = calculate_agreement_level(agreements)
-        st.metric(
-            label="Overall Agreement Level",
-            value=f"{agreement_level:.1f}%",
-            delta=None
-        )
-        
-        # Display key agreements and disagreements
-        col1, col2 = st.columns(2)
-        with col1:
-            st.markdown("#### Key Agreements")
-            for point in agreements.get('agreements', [])[:3]:
-                st.markdown(f"- {point}")
-        
-        with col2:
-            st.markdown("#### Key Disagreements")
-            for point in agreements.get('disagreements', [])[:3]:
-                st.markdown(f"- {point}")
-    else:
-        st.info("Insufficient data to analyze reviewer agreement.")
+    st.metric(
+        label="Overall Agreement Level",
+        value=f"{agreement_level:.1f}%",
+        delta=None
+    )
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("#### Key Agreements")
+        for point in agreements[:3]:  # Show top 3
+            st.markdown(f"* {point}")
+    
+    with col2:
+        st.markdown("#### Key Disagreements")
+        for point in disagreements[:3]:  # Show top 3
+            st.markdown(f"* {point}")
 
 def display_iteration_results(iteration: Dict[str, Any]):
-    """Display results from a single iteration."""
+    """Display results from a single iteration.""""""Display results from a single iteration."""
     for review in iteration['reviews']:
         if review.get('success', False):
             st.markdown(f"### Review by {review['expertise']}")
@@ -1552,12 +1547,43 @@ def analyze_reviewer_agreement(results: Dict[str, Any]) -> Dict[str, Any]:
         'disagreements': list(set(disagreements))
     }
 
-def calculate_agreement_level(agreements: Dict[str, List[str]]) -> float:
-    """Calculate overall agreement level as a percentage."""
-    total_points = len(agreements['agreements']) + len(agreements['disagreements'])
-    if total_points == 0:
-        return 0.0
-    return (len(agreements['agreements']) / total_points) * 100
+def calculate_agreement_level(iterations: List[Dict[str, Any]]) -> Tuple[float, List[str], List[str]]:
+    """Calculate review agreement metrics."""
+    all_points = defaultdict(int)
+    total_reviewers = 0
+    
+    # Count occurrences of each point across all reviews
+    for iteration in iterations:
+        if not isinstance(iteration, dict):
+            continue
+            
+        for review in iteration.get('reviews', []):
+            if review.get('success', False):
+                total_reviewers += 1
+                points = extract_key_points(review.get('review_text', ''))
+                for point in points:
+                    point_key = point.lower().strip()
+                    all_points[point_key] += 1
+    
+    agreements = []
+    disagreements = []
+    
+    if total_reviewers > 0:
+        threshold = total_reviewers / 2
+        for point, count in all_points.items():
+            if count > threshold:
+                agreements.append(point)
+            else:
+                disagreements.append(point)
+        
+        if agreements or disagreements:
+            agreement_level = (len(agreements) / (len(agreements) + len(disagreements))) * 100
+        else:
+            agreement_level = 0.0
+    else:
+        agreement_level = 0.0
+    
+    return agreement_level, agreements, disagreements
 
 def split_review_sections(review_text: str) -> Dict[str, str]:
     """Split review text into logical sections."""
