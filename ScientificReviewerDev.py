@@ -1594,29 +1594,63 @@ def extract_consensus_points(results: Dict[str, Any]) -> Dict[str, Dict[str, int
         'optional': dict(sorted(optional.items(), key=lambda x: x[1], reverse=True))
     }
 
-
 def display_review_results(results: Dict[str, Any]):
-    """Display review results with improved organization and deduplication."""
-    # Score summary section
-    st.markdown("### Score Summary")
-    scores = extract_all_scores(results)
-    if not scores:
-        st.info("No numerical scores found in reviews.")
-        
-    # Consensus analysis section
-    st.markdown("### Consensus Analysis")
-    consensus_points = extract_consensus_points(results)
+    """Display review results without nested expanders."""
+    summary_tab, details_tab = st.tabs(["Summary", "Detailed Review"])
     
-    if consensus_points['required']:
-        st.markdown("#### Required Changes")
-        for point, count in consensus_points['required'].items():
-            st.markdown(f"* {point} ({count} reviewers)")
+    with summary_tab:
+        # Display overall scores
+        scores = extract_all_scores(results)
+        if scores['overall']:
+            st.markdown("### Overall Scores")
+            cols = st.columns(len(scores['overall']))
+            for col, (category, score) in zip(cols, scores['overall'].items()):
+                with col:
+                    if isinstance(score, str) and '★' in score:
+                        st.markdown(f"**{category.title()}**\n\n{score}")
+                    else:
+                        st.metric(label=category.title(), value=f"{score:.1f}")
+        
+        # Display consensus points
+        consensus = extract_consensus_points(results)
+        if consensus['required'] or consensus['optional']:
+            st.markdown("### Consensus Points")
+            col1, col2 = st.columns(2)
             
-    if consensus_points['optional']:
-        st.markdown("#### Optional Improvements")
-        for point, count in consensus_points['optional'].items():
-            st.markdown(f"* {point} ({count} reviewers)")
-
+            with col1:
+                if consensus['required']:
+                    st.markdown("#### Required Changes")
+                    for point, count in consensus['required'].items():
+                        st.markdown(f"- {point} ({count} reviewers)")
+            
+            with col2:
+                if consensus['optional']:
+                    st.markdown("#### Optional Improvements")
+                    for point, count in consensus['optional'].items():
+                        st.markdown(f"- {point} ({count} reviewers)")
+    
+    with details_tab:
+        # Display individual reviews
+        for i, iteration in enumerate(results.get('iterations', [])):
+            st.markdown(f"### Iteration {i+1}")
+            
+            for review in iteration.get('reviews', []):
+                if review.get('success'):
+                    st.markdown(f"#### Review by {review['expertise']}")
+                    
+                    # Display review sections using tabs instead of expanders
+                    sections = extract_review_sections(review['review_text'])
+                    if sections:
+                        section_tabs = st.tabs(list(sections.keys()))
+                        for tab, (section_title, content) in zip(section_tabs, sections.items()):
+                            with tab:
+                                st.markdown('\n'.join(content))
+                    else:
+                        st.markdown(review['review_text'])
+                    
+                    st.markdown(f"*Reviewed at: {review['timestamp']}*")
+                    st.markdown("---")
+                    
 def display_score_summary(results: Dict[str, Any]):
     """Display summary of scores across all reviews."""
     st.markdown("### Score Summary")
