@@ -1787,7 +1787,7 @@ def main_content():
     tab1, tab2 = st.tabs(["Configure & Review", "Review History"])
     
     with tab1:
-        show_configuration_tab()show_configuration_tab()
+        show_configuration_tab()
     
     with tab2:
         show_history_tab()
