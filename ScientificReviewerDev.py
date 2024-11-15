@@ -1352,7 +1352,7 @@ def extract_all_scores(results: Dict[str, Any]) -> Dict[str, Any]:
     
     return scores
 
-def display_review_results(results: Dict[str, Any]):def display_review_results(results: Dict[str, Any]):
+def display_review_results(results: Dict[str, Any]):
     """Display review results with enhanced formatting and visualization."""
     st.markdown('<h2 class="section-header">Review Results</h2>', unsafe_allow_html=True)
 
