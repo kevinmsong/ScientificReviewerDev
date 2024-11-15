@@ -506,7 +506,7 @@ class EnhancedReviewContext:
         except Exception as e:
             logging.error(f"Error extracting critiques: {e}")
             return []
-    
+        
     def _extract_recommendations(self, review_text: str) -> List[str]:
         """Extract recommendations from review text."""
         recommendations = []
@@ -846,6 +846,23 @@ Please provide specific examples from the discussion to support your analysis.""
         
         return prompt
 
+def process_single_review(review_text: str) -> Dict[str, Any]:
+    """Process a single review into structured data."""
+    sections = extract_review_sections(review_text)
+    scores = extract_scores(sections)
+    recommendations = extract_recommendations(sections)
+    
+    analysis_sections = {
+        key: content for key, content in sections.items() 
+        if key.startswith('analysis_')
+    }
+    
+    return {
+        'scores': scores,
+        'recommendations': recommendations,
+        'analysis': analysis_sections
+    }
+
 def initialize_review_settings():
     """Initialize default review settings based on document type."""
     return {
@@ -853,6 +870,8 @@ def initialize_review_settings():
         "Grant Proposal": {"reviewers": 3, "iterations": 2, "rating": "nih"},
         "Poster": {"reviewers": 1, "iterations": 1, "rating": "stars"}
     }
+
+
 
 def init_app_state():
     """Initialize the application state with required managers."""
@@ -865,6 +884,69 @@ def init_app_state():
         except Exception as e:
             st.error(f"Error initializing application state: {e}")
             raise
+
+def extract_recommendations(sections: Dict[str, List[str]]) -> Dict[str, List[str]]:
+    """Extract required and optional recommendations."""
+    recommendations = {
+        'required': [],
+        'optional': []
+    }
+    
+    if 'recommendations' not in sections:
+        return recommendations
+        
+    for line in sections['recommendations']:
+        line = line.strip()
+        if not line:
+            continue
+            
+        if '[REQUIRED]' in line:
+            point = line.replace('[REQUIRED]', '').strip('- ').strip()
+            if point:
+                recommendations['required'].append(point)
+        elif '[OPTIONAL]' in line:
+            point = line.replace('[OPTIONAL]', '').strip('- ').strip()
+            if point:
+                recommendations['optional'].append(point)
+    
+    return recommendations
+
+def aggregate_reviews(all_reviews: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Aggregate multiple reviews into consensus data."""
+    all_scores = defaultdict(list)
+    required_points = defaultdict(int)
+    optional_points = defaultdict(int)
+    
+    for review in all_reviews:
+        # Aggregate scores
+        for category, score in review['scores'].items():
+            if isinstance(score, str) and '★' in score:
+                score = score.count('★')
+            all_scores[category].append(float(score))
+        
+        # Count recommendation occurrences
+        for point in review['recommendations']['required']:
+            required_points[point.lower()] += 1
+        for point in review['recommendations']['optional']:
+            optional_points[point.lower()] += 1
+    
+    # Calculate score averages
+    average_scores = {}
+    for category, scores in all_scores.items():
+        avg = sum(scores) / len(scores)
+        if any('★' in str(s) for s in scores):
+            stars = '★' * round(avg) + '☆' * (5 - round(avg))
+            average_scores[category] = stars
+        else:
+            average_scores[category] = avg
+    
+    return {
+        'average_scores': average_scores,
+        'required_consensus': dict(sorted(required_points.items(), 
+                                 key=lambda x: x[1], reverse=True)),
+        'optional_consensus': dict(sorted(optional_points.items(), 
+                                 key=lambda x: x[1], reverse=True))
+    }
 
 def show_review_history():
     """Display review history in the sidebar."""
@@ -1352,39 +1434,86 @@ def extract_all_scores(results: Dict[str, Any]) -> Dict[str, Any]:
     
     return scores
 
-def display_review_results(results: Dict[str, Any]):
-    """Display review results with enhanced formatting and visualization."""
-    st.markdown('<h2 class="section-header">Review Results</h2>', unsafe_allow_html=True)
-
-    # Top level tabs for main sections
-    summary_tab, iterations_tab, analysis_tab = st.tabs(["Summary", "Review Iterations", "Analysis"])
+def extract_points_by_pattern(text: str, marker: str) -> List[str]:
+    """Extract points using specific markers."""
+    pattern = rf"{re.escape(marker)}:?\s*([^•\n][^\n]+)"
+    points = []
     
-    with summary_tab:
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            display_score_summary(results)
-        with col2:
-            display_consensus_metrics(results)
-        with col3:
-            display_reviewer_agreement(results)
+    matches = re.finditer(pattern, text, re.IGNORECASE)
+    for match in matches:
+        point = match.group(1).strip()
+        if point and not point.startswith(('*', '-', '•')):
+            points.append(point)
+    
+    return points
 
-    with iterations_tab:
-        for i, iteration in enumerate(results['iterations']):
-            st.markdown(f"### Iteration {i+1}")
-            st.markdown("---")
-            display_iteration_results(iteration)
+def normalize_point(point: str) -> str:
+    """Normalize point text to avoid duplicates."""
+    # Remove common prefixes and normalize whitespace
+    point = re.sub(r'^[•\-*\s]+', '', point)
+    point = ' '.join(point.split()).lower()
+    
+    # Remove common leading phrases
+    point = re.sub(r'^(?:changes?|improvements?|suggestions?|edits?):\s*', '', point)
+    
+    # Capitalize first letter for display
+    return point.capitalize() if point else ''
 
-    with analysis_tab:
-        if results.get('moderation'):
-            st.markdown("### Moderator Analysis")
-            display_moderation_results(results['moderation'])
+def extract_consensus_points(results: Dict[str, Any]) -> Dict[str, Dict[str, int]]:
+    """Extract and deduplicate consensus points."""
+    required = defaultdict(int)
+    optional = defaultdict(int)
+    
+    for iteration in results.get('iterations', []):
+        for review in iteration.get('reviews', []):
+            if not review.get('success', False):
+                continue
+                
+            text = review.get('review_text', '')
             
-            sections = split_moderation_sections(results['moderation'])
-            if sections:
-                section_tabs = st.tabs(list(sections.keys()))
-                for tab, (title, content) in zip(section_tabs, sections.items()):
-                    with tab:
-                        st.markdown(content)
+            # Extract required changes
+            for marker in ['[REQUIRED]', 'Required Changes', 'required changes']:
+                points = extract_points_by_pattern(text, marker)
+                for point in points:
+                    normalized = normalize_point(point)
+                    if normalized:
+                        required[normalized] += 1
+            
+            # Extract optional improvements
+            for marker in ['[OPTIONAL]', 'Optional Improvements', 'optional improvements']:
+                points = extract_points_by_pattern(text, marker)
+                for point in points:
+                    normalized = normalize_point(point)
+                    if normalized:
+                        optional[normalized] += 1
+    
+    return {
+        'required': dict(sorted(required.items(), key=lambda x: x[1], reverse=True)),
+        'optional': dict(sorted(optional.items(), key=lambda x: x[1], reverse=True))
+    }
+
+
+def display_review_results(results: Dict[str, Any]):
+    """Display review results with improved organization and deduplication."""
+    # Score summary section
+    st.markdown("### Score Summary")
+    scores = extract_all_scores(results)
+    if not scores:
+        st.info("No numerical scores found in reviews.")
+        
+    # Consensus analysis section
+    st.markdown("### Consensus Analysis")
+    consensus_points = extract_consensus_points(results)
+    
+    if consensus_points['required']:
+        st.markdown("#### Required Changes")
+        for point, count in consensus_points['required'].items():
+            st.markdown(f"* {point} ({count} reviewers)")
+            
+    if consensus_points['optional']:
+        st.markdown("#### Optional Improvements")
+        for point, count in consensus_points['optional'].items():
+            st.markdown(f"* {point} ({count} reviewers)")
 
 def display_score_summary(results: Dict[str, Any]):
     """Display summary of scores across all reviews."""
@@ -1714,6 +1843,33 @@ Generated: {timestamp}
 
     return report
 
+def extract_scores(sections: Dict[str, List[str]]) -> Dict[str, Union[int, str]]:
+    """Extract numerical and star ratings."""
+    scores = {}
+    
+    # Look for scores in scoring section and assessment section
+    score_sections = ['scoring', 'assessment']
+    for section in score_sections:
+        if section not in sections:
+            continue
+            
+        for line in sections[section]:
+            # Match star ratings
+            star_match = re.search(r'([★]+(?:☆)*)', line)
+            if star_match:
+                category = re.sub(r'[★☆\s]*$', '', line).strip().lower()
+                scores[category] = star_match.group(1)
+                continue
+                
+            # Match numeric scores
+            score_match = re.search(r'(\w+(?:\s+\w+)?):?\s*(\d+(?:\.\d+)?)', line)
+            if score_match:
+                category = score_match.group(1).strip().lower()
+                score = float(score_match.group(2))
+                scores[category] = score
+    
+    return scores
+
 def generate_analysis_data(review_data: Dict[str, Any]) -> Dict[str, Any]:
     """Generate structured analysis data for export."""
     analysis = {
@@ -1899,6 +2055,7 @@ def extract_scores_from_review(review_text: str) -> Dict[str, Union[float, str]]
                         continue
     
     return scores
+
 def initialize_session_state():
     """Initialize session state variables with default values."""
     default_values = {
@@ -1911,6 +2068,51 @@ def initialize_session_state():
     for key, default_value in default_values.items():
         if key not in st.session_state:
             st.session_state[key] = default_value
+
+def extract_review_sections(review_text: str) -> Dict[str, List[str]]:
+    """Extract structured sections from review text."""
+    sections = defaultdict(list)
+    current_section = None
+    
+    # Primary section markers
+    section_markers = {
+        'SECTION-BY-SECTION ANALYSIS': 'analysis',
+        'OVERALL ASSESSMENT': 'assessment',
+        'SCORING': 'scoring',
+        'RECOMMENDATIONS': 'recommendations'
+    }
+    
+    # Subsection markers for analysis sections
+    subsection_markers = {
+        'Introduction & Background',
+        'Methods',
+        'Results', 
+        'Discussion'
+    }
+
+    lines = review_text.split('\n')
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+            
+        # Check for main section headers
+        for marker, section_key in section_markers.items():
+            if marker in line.upper():
+                current_section = section_key
+                break
+                
+        # Check for subsection headers in analysis
+        if current_section == 'analysis':
+            for marker in subsection_markers:
+                if marker in line:
+                    current_section = f"analysis_{marker.lower().replace(' & ', '_')}"
+                    break
+        
+        if current_section and line:
+            sections[current_section].append(line)
+    
+    return dict(sections)
 
 def main_content():
     """Main application content."""
