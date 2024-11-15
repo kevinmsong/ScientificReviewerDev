@@ -1740,52 +1740,100 @@ def get_default_reviewer_prompt(doc_type: str) -> str:
     return prompts.get(doc_type, {}).get('reviewer', "Please provide a thorough review.")
 
 def extract_key_points(text: str) -> List[str]:
-    """Extract key points from review text."""
-    points = []
+    """Extract key points with improved pattern matching."""
+    key_points = []
+    
+    # Patterns for finding key points
     patterns = [
-        r'(?:•|\*|\-|\d+\.)\s*([^\n]+)',
-        r'key\s+points?:([^\n]+)',
-        r'strengths?:([^\n]+)',
-        r'weaknesses?:([^\n]+)'
+        r'(?:key\s+points?|main\s+points?|findings?|conclusions?):\s*([^.]*(?:\.[^.]*){0,2})',
+        r'(?:required\s+changes?|recommendations?):\s*([^.]*(?:\.[^.]*){0,2})',
+        r'(?:optional\s+improvements?|suggestions?):\s*([^.]*(?:\.[^.]*){0,2})',
+        r'(?:line-specific\s+edits?|changes?):\s*([^.]*(?:\.[^.]*){0,2})',
+        r'(?:•|\*|\-)\s*([^.\n]*(?:\.[^.\n]*){0,2})'
     ]
     
     for pattern in patterns:
-        matches = re.finditer(pattern, text, re.IGNORECASE)
+        matches = re.finditer(pattern, text, re.IGNORECASE | re.MULTILINE)
         for match in matches:
             point = match.group(1).strip()
-            if point:
-                points.append(point)
+            if point and len(point) > 10:  # Avoid very short fragments
+                key_points.append(point)
     
-    return points
+    return list(set(key_points))  # Remove duplicates
+    
+def calculate_agreement_level(iterations: List[Dict[str, Any]]) -> Tuple[float, List[str], List[str]]:
+    """Calculate review agreement with improved metrics."""
+    all_points = defaultdict(int)
+    total_reviewers = 0
+    agreements = []
+    disagreements = []
+    
+    # Count occurrences of each point
+    for iteration in iterations:
+        iteration_points = defaultdict(list)
+        for review in iteration.get('reviews', []):
+            if review.get('success', False):
+                total_reviewers += 1
+                points = extract_key_points(review.get('review_text', ''))
+                for point in points:
+                    point_key = point.lower().strip()
+                    all_points[point_key] += 1
+                    iteration_points[point_key].append(review.get('expertise', ''))
+    
+    if total_reviewers > 0:
+        # Find agreements and disagreements
+        for point, count in all_points.items():
+            agreement_ratio = count / total_reviewers
+            if agreement_ratio > 0.5:  # More than half agree
+                agreements.append(point)
+            else:
+                disagreements.append(point)
+        
+        # Calculate overall agreement level
+        if agreements or disagreements:
+            agreement_level = (len(agreements) / (len(agreements) + len(disagreements))) * 100
+        else:
+            agreement_level = 0.0
+            
+        return agreement_level, agreements, disagreements
+    
+    return 0.0, [], []
 
 def extract_scores_from_review(review_text: str) -> Dict[str, Union[float, str]]:
-    """Extract scores from review text with improved pattern matching."""
+    """Extract scores with comprehensive pattern matching."""
     scores = {}
-    patterns = [
-        # Star ratings (★☆)
-        r'(\w+)(?:\s+rating|\s+score)?:\s*([★]+(?:☆)*)',
-        r'(\w+)(?:\s+rating|\s+score)?:\s*(\d+)(?:\s*\/\s*\d+)?',
-        r'Score for (\w+):\s*(\d+(?:\.\d+)?)',
-        r'(\w+):\s*(\d+(?:\.\d+)?)\s*out of\s*\d+',
+    
+    # Expanded patterns for different score formats
+    score_patterns = [
+        # Star ratings
+        r'(\w+(?:\s+\w+)?)\s*(?:rating|score)?\s*:\s*([★]+(?:☆)*)',
+        # Numeric scores with denominators
+        r'(\w+(?:\s+\w+)?)\s*(?:rating|score)?\s*:\s*(\d+(?:\.\d+)?)\s*(?:/|\bof\b|\bout of\b)\s*\d+',
+        # Plain numeric scores
+        r'(\w+(?:\s+\w+)?)\s*(?:rating|score)?\s*:\s*(\d+(?:\.\d+)?)\b',
         # NIH style scores
-        r'(\w+)\s+\(Score\s+(\d+(?:-\d+)?)\)',
-        r'(\w+)\s+Score:\s*(\d+)'
+        r'(\w+(?:\s+\w+)?)\s*Impact Score:\s*(\d+)',
+        r'Overall Impact:\s*(\d+)'
     ]
     
-    for pattern in re.finditer(r'([A-Za-z\s]+)(?:rating|score)?:?\s*((?:★|☆){1,5}|\d+(?:\.\d+)?(?:\s*\/\s*\d+)?)', review_text, re.IGNORECASE):
-        category = pattern.group(1).strip().lower()
-        score_text = pattern.group(2).strip()
-        
-        if '★' in score_text:
-            scores[category] = score_text
-        else:
-            # Extract first number from score text# Extract first number from score text
-            number_match = re.search(r'\d+(?:\.\d+)?', score_text)
-            if number_match:
-                scores[category] = float(number_match.group())
+    text_blocks = re.split(r'\n{2,}', review_text)
+    for block in text_blocks:
+        for pattern in score_patterns:
+            matches = re.finditer(pattern, block, re.IGNORECASE)matches = re.finditer(pattern, block, re.IGNORECASE)
+            for match in matches:
+                category = match.group(1).strip().lower()
+                score_text = match.group(2).strip()
+                
+                # Convert scores to appropriate format
+                if '★' in score_text:
+                    scores[category] = score_text
+                else:
+                    try:
+                        scores[category] = float(score_text)
+                    except ValueError:
+                        continue
     
     return scores
-
 def initialize_session_state():
     """Initialize session state variables with default values."""
     default_values = {
