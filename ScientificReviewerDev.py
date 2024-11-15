@@ -1497,16 +1497,15 @@ def display_reviewer_agreement(results: Dict[str, Any]):
     
     with col2:
         st.markdown("#### Key Disagreements")
-        for point in disagreements:
-            st.markdown(f"* {point}")st.markdown(f"* {point}")
+        for point in disagreements:for point in disagreements:
+            st.markdown(f"* {point}")
 
 def display_iteration_results(iteration: Dict[str, Any]):
-    """Display results from a single iteration.""""""Display results from a single iteration."""
+    """Display results from a single iteration."""
     for review in iteration['reviews']:
         if review.get('success', False):
             st.markdown(f"### Review by {review['expertise']}")
             
-            # Extract and display scores
             scores = extract_scores_from_review(review['review_text'])
             if scores:
                 st.markdown("#### Scores")
@@ -1515,13 +1514,15 @@ def display_iteration_results(iteration: Dict[str, Any]):
                     with col:
                         display_score(category, score)
             
-            # Display main review content using tabs instead of nested expanders
+            # Display content in tabs for better organization
             sections = split_review_sections(review['review_text'])
             if sections:
                 section_tabs = st.tabs(list(sections.keys()))
                 for tab, (section_title, content) in zip(section_tabs, sections.items()):
                     with tab:
-                        st.markdown(content)
+                        st.markdown(content.strip())
+            else:
+                st.markdown(review['review_text'])
             
             st.markdown(f"*Reviewed at: {review['timestamp']}*")
             st.markdown("---")
