@@ -1404,15 +1404,27 @@ def display_score_summary(results: Dict[str, Any]):
         for category in score_categories:
             scores = [s[category] for s in all_scores if category in s]
             if scores:
-                averages[category] = sum(scores) / len(scores)
-        
-        # Display scores
-        for category, avg in averages.items():
-            st.metric(
-                label=category.title(),
-                value=f"{avg:.1f}",
-                delta=None
-            )
+                # Handle star ratings and numeric scores separately
+                if any('★' in str(s) for s in scores):
+                    # Count stars for star ratings
+                    star_counts = [str(s).count('★') for s in scores]
+                    averages[category] = sum(star_counts) / len(star_counts)
+                    # Display as stars
+                    st.metric(
+                        label=category.title(),
+                        value='★' * round(averages[category]) + '☆' * (5 - round(averages[category])),
+                        delta=None
+                    )
+                else:
+                    # Handle numeric scores
+                    numeric_scores = [float(s) for s in scores if str(s).replace('.', '').isdigit()]
+                    if numeric_scores:
+                        averages[category] = sum(numeric_scores) / len(numeric_scores)
+                        st.metric(
+                            label=category.title(),
+                            value=f"{averages[category]:.1f}",
+                            delta=None
+                        )
     else:
         st.info("No numerical scores found in reviews.")
 
