@@ -1521,7 +1521,7 @@ def display_moderation_results(moderation: str):
         for tab, (title, content) in zip(section_tabs, sections.items()):
             with tab:
                 st.markdown(content)
-    else:else:
+    else:
         # If no sections found, display full text
         st.markdown(moderation)
 
