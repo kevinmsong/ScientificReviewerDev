@@ -13,7 +13,7 @@ from openai import OpenAI
 from langchain_openai import ChatOpenAI
 from langchain.schema import HumanMessage
 import fitz
-import ioimport io
+import io
 from PIL import Image
 import base64
 from typing import List, Dict, Any, Tuple, Union, Optional, Set, defaultdict
