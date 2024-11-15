@@ -1616,39 +1616,104 @@ def display_score(category: str, score: Union[float, int, str]):
         )
 
 def generate_review_report(review_data: Dict[str, Any]) -> str:
-    """Generate a formatted markdown report of the review results."""
+    """Generate a comprehensive markdown report of review results."""
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    
     report = f"""# Scientific Review Report
-Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+Generated: {timestamp}
 
 ## Document Information
-- Type: {review_data['document_type']}
-- Venue: {review_data['venue']}
-- Number of Reviewers: {len(review_data.get('expertises', []))}
-- Number of Iterations: {review_data.get('num_iterations', 0)}
-
-## Review Results
+- Type: {review_data.get('document_type', 'Not specified')}
+- Venue: {review_data.get('venue', 'Not specified')}
 """
-    
+
+    # Add metadata if available
+    if 'document_metadata' in review_data:
+        metadata = review_data['document_metadata']
+        report += f"""
+### Document Metadata
+- Title: {metadata.get('title', 'Not available')}
+- Author(s): {metadata.get('author', 'Not available')}
+- Pages: {metadata.get('total_pages', 'Not specified')}
+"""
+
     # Add iteration results
     for i, iteration in enumerate(review_data.get('iterations', []), 1):
-        report += f"\n### Iteration {i}\n"
-        for review in iteration['reviews']:
-            if review.get('success', False):
-                report += f"\n#### Review by {review['expertise']}\n"
-                report += review['review_text']
-                report += "\n---\n"
-    
-    # Add moderator analysis
-    if review_data.get('moderation'):
+        report += f"\n## Review Iteration {i}\n"
+        for review in iteration.get('reviews', []):
+            if review.get('success'):
+                report += f"\n### Review by {review.get('expertise', 'Anonymous Reviewer')}\n"
+                report += f"*Timestamp: {review.get('timestamp', 'Not recorded')}*\n\n"
+                
+                # Extract and add scores
+                scores = extract_scores_from_review(review.get('review_text', ''))
+                if scores:
+                    report += "\n#### Scores\n"
+                    for category, score in scores.items():
+                        report += f"- {category.title()}: {score}\n"
+                
+                report += "\n#### Review Content\n"
+                report += review.get('review_text', 'No review text provided')
+                report += "\n\n---\n"
+
+    # Add moderation analysis
+    if 'moderation' in review_data and review_data['moderation']:
         report += "\n## Moderator Analysis\n"
         report += review_data['moderation']
-    
-    # Add analysis summary
-    if 'analysis' in review_data:
-        report += "\n## Analysis Summary\n"
-        report += generate_analysis_summary(review_data['analysis'])
-    
+        report += "\n\n---\n"
+
     return report
+
+def generate_analysis_data(review_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Generate structured analysis data for export."""
+    analysis = {
+        'metadata': {
+            'timestamp': datetime.now().isoformat(),
+            'document_type': review_data.get('document_type'),
+            'venue': review_data.get('venue')
+        },
+        'scores': {},
+        'statistics': {
+            'total_reviews': 0,
+            'average_scores': {},
+            'score_distribution': {}
+        },
+        'reviews': []
+    }
+    
+    all_scores = defaultdict(list)
+    
+    # Process each review
+    for iteration in review_data.get('iterations', []):
+        for review in iteration.get('reviews', []):
+            if review.get('success'):
+                analysis['statistics']['total_reviews'] += 1
+                
+                review_data = {
+                    'reviewer': review.get('expertise'),
+                    'timestamp': review.get('timestamp'),
+                    'scores': extract_scores_from_review(review.get('review_text', '')),
+                    'key_points': extract_key_points(review.get('review_text', ''))
+                }
+                
+                analysis['reviews'].append(review_data)
+                
+                # Accumulate scores# Accumulate scores
+                for category, score in review_data['scores'].items():for category, score in review_data['scores'].items():
+                    if isinstance(score, (int, float)):
+                        all_scores[category].append(score)
+    
+    # Calculate statistics
+    for category, scores in all_scores.items():
+        if scores:
+            analysis['statistics']['average_scores'][category] = sum(scores) / len(scores)
+            analysis['statistics']['score_distribution'][category] = {
+                'min': min(scores),
+                'max': max(scores),
+                'median': sorted(scores)[len(scores)//2]
+            }
+    
+    return analysis
 
 def generate_analysis_summary(analysis: Dict[str, Any]) -> str:
     """Generate a summary of the review analysis."""
@@ -1694,26 +1759,30 @@ def extract_key_points(text: str) -> List[str]:
     return points
 
 def extract_scores_from_review(review_text: str) -> Dict[str, Union[float, str]]:
-    """Extract scores from review text with support for different formats."""
+    """Extract scores from review text with improved pattern matching."""
     scores = {}
     patterns = [
-        r'(\w+)\s*(?:score|rating):\s*(\d+(?:\.\d+)?)/?\d*',
-        r'(\w+):\s*(\d+(?:\.\d+)?)\s*(?:out of|/)\s*\d+',
-        r'(\w+):\s*([★]+(?:☆)*)',
+        # Star ratings (★☆)
+        r'(\w+)(?:\s+rating|\s+score)?:\s*([★]+(?:☆)*)',
+        r'(\w+)(?:\s+rating|\s+score)?:\s*(\d+)(?:\s*\/\s*\d+)?',
+        r'Score for (\w+):\s*(\d+(?:\.\d+)?)',
+        r'(\w+):\s*(\d+(?:\.\d+)?)\s*out of\s*\d+',
+        # NIH style scores
+        r'(\w+)\s+\(Score\s+(\d+(?:-\d+)?)\)',
+        r'(\w+)\s+Score:\s*(\d+)'
     ]
     
-    for pattern in patterns:
-        matches = re.finditer(pattern, review_text, re.IGNORECASE)
-        for match in matches:
-            category = match.group(1).strip()
-            score = match.group(2)
-            if '★' in str(score):
-                scores[category] = score
-            else:
-                try:
-                    scores[category] = float(score)
-                except ValueError:
-                    continue
+    for pattern in re.finditer(r'([A-Za-z\s]+)(?:rating|score)?:?\s*((?:★|☆){1,5}|\d+(?:\.\d+)?(?:\s*\/\s*\d+)?)', review_text, re.IGNORECASE):
+        category = pattern.group(1).strip().lower()
+        score_text = pattern.group(2).strip()
+        
+        if '★' in score_text:
+            scores[category] = score_text
+        else:
+            # Extract first number from score text# Extract first number from score text
+            number_match = re.search(r'\d+(?:\.\d+)?', score_text)
+            if number_match:
+                scores[category] = float(number_match.group())
     
     return scores
 
@@ -1783,7 +1852,7 @@ def main_content():
             )
             st.session_state.debug_mode = debug_mode
     
-    # Main content area with tabs
+    # Main content area with tabs# Main content area with tabs
     tab1, tab2 = st.tabs(["Configure & Review", "Review History"])
     
     with tab1:
