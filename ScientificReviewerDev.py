@@ -1352,35 +1352,39 @@ def extract_all_scores(results: Dict[str, Any]) -> Dict[str, Any]:
     
     return scores
 
-def display_review_results(results: Dict[str, Any]):
+def display_review_results(results: Dict[str, Any]):def display_review_results(results: Dict[str, Any]):
     """Display review results with enhanced formatting and visualization."""
     st.markdown('<h2 class="section-header">Review Results</h2>', unsafe_allow_html=True)
 
-    # Overview metrics
-    with st.container():
+    # Top level tabs for main sections
+    summary_tab, iterations_tab, analysis_tab = st.tabs(["Summary", "Review Iterations", "Analysis"])
+    
+    with summary_tab:
         col1, col2, col3 = st.columns(3)
-        
         with col1:
             display_score_summary(results)
-        
         with col2:
             display_consensus_metrics(results)
-        
         with col3:
             display_reviewer_agreement(results)
 
-    # Detailed results by iteration
-    tab_titles = [f"Iteration {i+1}" for i in range(len(results['iterations']))]
-    tabs = st.tabs(tab_titles)
+    with iterations_tab:
+        for i, iteration in enumerate(results['iterations']):
+            st.markdown(f"### Iteration {i+1}")
+            st.markdown("---")
+            display_iteration_results(iteration)
 
-    for i, tab in enumerate(tabs):
-        with tab:
-            display_iteration_results(results['iterations'][i])
-
-    # Moderator analysis
-    if results.get('moderation'):
-        with st.expander("Moderator Analysis", expanded=True):
+    with analysis_tab:
+        if results.get('moderation'):
+            st.markdown("### Moderator Analysis")
             display_moderation_results(results['moderation'])
+            
+            sections = split_moderation_sections(results['moderation'])
+            if sections:
+                section_tabs = st.tabs(list(sections.keys()))
+                for tab, (title, content) in zip(section_tabs, sections.items()):
+                    with tab:
+                        st.markdown(content)
 
 def display_score_summary(results: Dict[str, Any]):
     """Display summary of scores across all reviews."""
