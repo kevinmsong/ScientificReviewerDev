@@ -1819,7 +1819,7 @@ def extract_scores_from_review(review_text: str) -> Dict[str, Union[float, str]]
     text_blocks = re.split(r'\n{2,}', review_text)
     for block in text_blocks:
         for pattern in score_patterns:
-            matches = re.finditer(pattern, block, re.IGNORECASE)matches = re.finditer(pattern, block, re.IGNORECASE)
+            matches = re.finditer(pattern, block, re.IGNORECASE)
             for match in matches:
                 category = match.group(1).strip().lower()
                 score_text = match.group(2).strip()
