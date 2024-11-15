@@ -1497,7 +1497,7 @@ def display_reviewer_agreement(results: Dict[str, Any]):
     
     with col2:
         st.markdown("#### Key Disagreements")
-        for point in disagreements:for point in disagreements:
+        for point in disagreements:
             st.markdown(f"* {point}")
 
 def display_iteration_results(iteration: Dict[str, Any]):
