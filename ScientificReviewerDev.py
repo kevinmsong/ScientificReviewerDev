@@ -13,10 +13,10 @@ from openai import OpenAI
 from langchain_openai import ChatOpenAI
 from langchain.schema import HumanMessage
 import fitz
-import io
+import ioimport io
 from PIL import Image
 import base64
-from typing import List, Dict, Any, Tuple, Union, Optional
+from typing import List, Dict, Any, Tuple, Union, Optional, Set, defaultdict
 import tiktoken
 import time
 import json
@@ -1788,7 +1788,22 @@ def get_default_reviewer_prompt(doc_type: str) -> str:
     """Get default prompt for a reviewer based on document type."""
     prompts = get_default_prompts()
     return prompts.get(doc_type, {}).get('reviewer', "Please provide a thorough review.")
-
+def extract_points_by_type(text: str, markers: List[str]) -> Set[str]:
+    """Extract points of a specific type from review text."""
+    points = set()
+    
+    # Create pattern for the markers
+    marker_pattern = '|'.join(map(re.escape, markers))
+    pattern = rf"(?:{marker_pattern})[:\s]+([^•\n]+)"
+    
+    matches = re.finditer(pattern, text, re.IGNORECASE | re.MULTILINE)
+    for match in matches:
+        point = match.group(1).strip()
+        if point:
+            points.add(point)
+    
+    return points
+    
 def extract_key_points(text: str) -> List[str]:
     """Extract key points with improved pattern matching."""
     key_points = []
