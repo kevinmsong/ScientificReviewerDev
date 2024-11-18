@@ -1114,6 +1114,7 @@ def show_selected_review():
         )
 
 def show_configuration_tab():
+    """Modified configuration tab to avoid nested expanders."""
     st.markdown('<h2 class="section-header">Document Configuration</h2>', unsafe_allow_html=True)
     review_defaults = initialize_review_settings()
     col1, col2 = st.columns(2)
@@ -1121,11 +1122,11 @@ def show_configuration_tab():
     with col1:
         doc_type = st.selectbox("Document Type", options=list(review_defaults.keys()), key="doc_type")
         default_settings = review_defaults[doc_type]
-        venue = st.text_input("Dissemination Venue", placeholder="e.g., Nature, NIH R01, Conference Name", help="Where this work is intended to be published/presented")
+        venue = st.text_input("Dissemination Venue", placeholder="e.g., Nature, NIH R01, Conference Name")
 
     with col2:
         rating_system = st.radio("Rating System", options=["stars", "nih"], format_func=lambda x: "Star Rating (1-5)" if x == "stars" else "NIH Scale (1-9)", horizontal=True)
-        is_nih_grant = st.checkbox("NIH Grant Review Format", value=True if doc_type == "Grant Proposal" else False, help="Include separate scores for Significance, Innovation, and Approach")
+        is_nih_grant = st.checkbox("NIH Grant Review Format", value=True if doc_type == "Grant Proposal" else False)
 
     uploaded_file = st.file_uploader(f"Upload {doc_type} (PDF format)", type=["pdf"], key="document_upload")
     if uploaded_file:
@@ -1134,32 +1135,45 @@ def show_configuration_tab():
         with col2: st.info(f"Size: {uploaded_file.size / 1024:.1f} KB")
 
     st.markdown('<h2 class="section-header">Reviewer Configuration</h2>', unsafe_allow_html=True)
-    num_reviewers = st.number_input("Number of Reviewers", min_value=1, max_value=10, value=default_settings['reviewers'], step=1, key="num_reviewers")
-    reviewer_config = {}
-    for i in range(int(num_reviewers)):
-        with st.expander(f"Reviewer {i+1} Configuration", expanded=True):
-            col1, col2 = st.columns(2)
-            with col1: expertise = st.text_input("Expertise", value=f"Scientific Expert {i+1}", key=f"expertise_{i}")
-            with col2: custom_prompt = st.text_area("Custom Instructions", value=get_default_reviewer_prompt(doc_type), height=150, key=f"prompt_{i}")
-            reviewer_config[f"reviewer_{i}"] = {"expertise": expertise, "prompt": custom_prompt}
+    num_reviewers = st.number_input("Number of Reviewers", min_value=1, max_value=10, value=default_settings['reviewers'])
+    
+    # Use tabs for reviewer configuration instead of expanders
+    if num_reviewers > 0:
+        reviewer_tabs = st.tabs([f"Reviewer {i+1}" for i in range(num_reviewers)])
+        reviewer_config = {}
+        
+        for i, tab in enumerate(reviewer_tabs):
+            with tab:
+                col1, col2 = st.columns(2)
+                with col1:
+                    expertise = st.text_input("Expertise", value=f"Scientific Expert {i+1}", key=f"expertise_{i}")
+                with col2:
+                    custom_prompt = st.text_area("Custom Instructions", value=get_default_reviewer_prompt(doc_type), height=150, key=f"prompt_{i}")
+                reviewer_config[f"reviewer_{i}"] = {"expertise": expertise, "prompt": custom_prompt}
 
-    num_iterations = st.number_input("Number of Discussion Iterations", min_value=1, max_value=5, value=default_settings['iterations'], help="Number of rounds of discussion between reviewers")
+    num_iterations = st.number_input("Number of Discussion Iterations", min_value=1, max_value=5, value=default_settings['iterations'])
 
-    st.markdown("### Review Actions")
-    can_generate = uploaded_file
-    if st.button("🚀 Generate Review", key="generate_review", disabled=not can_generate):
-        if not uploaded_file: st.error("❌ Please upload a PDF file first.")
+    if st.button("🚀 Generate Review", disabled=not uploaded_file):
+        if not uploaded_file:
+            st.error("❌ Please upload a PDF file first.")
         else:
             st.session_state.review_config = {
-                "document_type": doc_type, "venue": venue, "rating_system": rating_system, "is_nih_grant": is_nih_grant,
-                "reviewers": reviewer_config, "num_iterations": num_iterations, "bias": st.session_state.bias, "temperature": st.session_state.temperature
+                "document_type": doc_type,
+                "venue": venue,
+                "rating_system": rating_system,
+                "is_nih_grant": is_nih_grant,
+                "reviewers": reviewer_config,
+                "num_iterations": num_iterations
             }
             st.success("✅ Configuration saved successfully!")
-            with st.spinner("📊 Processing review..."): process_review(uploaded_file, int(num_reviewers))
+            with st.spinner("📊 Processing review..."):
+                process_review(uploaded_file, num_reviewers)
 
+    # Display current review status using tabs instead of expanders
     if 'current_review' in st.session_state:
-        with st.expander("Current Review Status", expanded=True): display_review_results(st.session_state.current_review)
-
+        st.markdown("### Current Review Status")
+        display_review_results(st.session_state.current_review)
+        
 def process_review(uploaded_file, num_reviewers):
     try:
         config = st.session_state.review_config
@@ -1593,64 +1607,7 @@ def extract_consensus_points(results: Dict[str, Any]) -> Dict[str, Dict[str, int
         'required': dict(sorted(required.items(), key=lambda x: x[1], reverse=True)),
         'optional': dict(sorted(optional.items(), key=lambda x: x[1], reverse=True))
     }
-
-def display_review_results(results: Dict[str, Any]):
-    """Display review results without nested expanders."""
-    summary_tab, details_tab = st.tabs(["Summary", "Detailed Review"])
-    
-    with summary_tab:
-        # Display overall scores
-        scores = extract_all_scores(results)
-        if scores['overall']:
-            st.markdown("### Overall Scores")
-            cols = st.columns(len(scores['overall']))
-            for col, (category, score) in zip(cols, scores['overall'].items()):
-                with col:
-                    if isinstance(score, str) and '★' in score:
-                        st.markdown(f"**{category.title()}**\n\n{score}")
-                    else:
-                        st.metric(label=category.title(), value=f"{score:.1f}")
-        
-        # Display consensus points
-        consensus = extract_consensus_points(results)
-        if consensus['required'] or consensus['optional']:
-            st.markdown("### Consensus Points")
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                if consensus['required']:
-                    st.markdown("#### Required Changes")
-                    for point, count in consensus['required'].items():
-                        st.markdown(f"- {point} ({count} reviewers)")
-            
-            with col2:
-                if consensus['optional']:
-                    st.markdown("#### Optional Improvements")
-                    for point, count in consensus['optional'].items():
-                        st.markdown(f"- {point} ({count} reviewers)")
-    
-    with details_tab:
-        # Display individual reviews
-        for i, iteration in enumerate(results.get('iterations', [])):
-            st.markdown(f"### Iteration {i+1}")
-            
-            for review in iteration.get('reviews', []):
-                if review.get('success'):
-                    st.markdown(f"#### Review by {review['expertise']}")
-                    
-                    # Display review sections using tabs instead of expanders
-                    sections = extract_review_sections(review['review_text'])
-                    if sections:
-                        section_tabs = st.tabs(list(sections.keys()))
-                        for tab, (section_title, content) in zip(section_tabs, sections.items()):
-                            with tab:
-                                st.markdown('\n'.join(content))
-                    else:
-                        st.markdown(review['review_text'])
-                    
-                    st.markdown(f"*Reviewed at: {review['timestamp']}*")
-                    st.markdown("---")
-                    
+   
 def display_score_summary(results: Dict[str, Any]):
     """Display summary of scores across all reviews."""
     st.markdown("### Score Summary")
@@ -1714,7 +1671,11 @@ def extract_points_by_type(text: str, markers: List[str]) -> Set[str]:
     return points
 
 def display_review_results(results: Dict[str, Any]):
-    """Display review results with top-level tabs and proper section display."""
+    """Display review results using tabs and containers instead of nested expanders."""
+    if not results:
+        st.warning("No review results to display.")
+        return
+
     summary_tab, details_tab = st.tabs(["Summary", "Detailed Review"])
     
     with summary_tab:
@@ -1734,41 +1695,59 @@ def display_review_results(results: Dict[str, Any]):
         consensus = extract_consensus_points(results)
         if consensus['required'] or consensus['optional']:
             st.markdown("### Consensus Points")
+            col1, col2 = st.columns(2)
             
-            if consensus['required']:
-                st.markdown("#### Required Changes")
-                for point, count in consensus['required'].items():
-                    st.markdown(f"- {point} ({count} reviewers)")
+            with col1:
+                if consensus['required']:
+                    st.markdown("#### Required Changes")
+                    for point, count in consensus['required'].items():
+                        st.markdown(f"- {point} ({count} reviewers)")
             
-            if consensus['optional']:
-                st.markdown("#### Optional Improvements")
-                for point, count in consensus['optional'].items():
-                    st.markdown(f"- {point} ({count} reviewers)")
+            with col2:
+                if consensus['optional']:
+                    st.markdown("#### Optional Improvements")
+                    for point, count in consensus['optional'].items():
+                        st.markdown(f"- {point} ({count} reviewers)")
     
     with details_tab:
-        # Display individual reviews
+        # Display iterations using tabs instead of expanders
+        iteration_tabs = []
         for i, iteration in enumerate(results.get('iterations', [])):
-            st.markdown(f"### Iteration {i+1}")
+            iteration_tabs.append(f"Iteration {i+1}")
+        
+        if iteration_tabs:
+            selected_iteration = st.selectbox("Select Iteration", iteration_tabs)
+            iteration_index = int(selected_iteration.split()[-1]) - 1
+            current_iteration = results['iterations'][iteration_index]
             
-            for review in iteration.get('reviews', []):
+            # Display reviews for selected iteration
+            for review in current_iteration.get('reviews', []):
                 if review.get('success'):
-                    with st.expander(f"Review by {review['expertise']}", expanded=True):
-                        # Display review sections
-                        sections = extract_review_sections(review['review_text'])
+                    st.markdown(f"### Review by {review['expertise']}")
+                    
+                    # Create containers for different sections
+                    sections = extract_review_sections(review['review_text'])
+                    if sections:
+                        section_names = list(sections.keys())
+                        selected_section = st.selectbox(
+                            "Select Section",
+                            section_names,
+                            key=f"section_{review['expertise']}"
+                        )
                         
-                        # Display scores first if present
-                        if 'scoring' in sections:
-                            st.markdown("#### Scores")
-                            for line in sections['scoring']:
-                                st.markdown(f"- {line}")
-                        
-                        # Display other sections
-                        for section, content in sections.items():
-                            if section != 'scoring':
-                                st.markdown(f"#### {section.replace('_', ' ').title()}")
-                                st.markdown('\n'.join(content))
-                        
-                        st.markdown(f"*Reviewed at: {review['timestamp']}*")
+                        st.markdown("---")
+                        if selected_section in sections:
+                            st.markdown('\n'.join(sections[selected_section]))
+                    else:
+                        st.markdown(review['review_text'])
+                    
+                    st.markdown(f"*Reviewed at: {review['timestamp']}*")
+                    st.markdown("---")
+        
+        # Display moderation results if available
+        if results.get('moderation'):
+            st.markdown("### Moderation Analysis")
+            st.markdown(results['moderation'])
 
 def display_consensus_metrics(results: Dict[str, Any]):
     """Display metrics about reviewer consensus and agreement."""
