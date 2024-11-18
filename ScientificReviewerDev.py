@@ -1114,30 +1114,58 @@ def show_selected_review():
         )
 
 def show_configuration_tab():
-    """Modified configuration tab to avoid nested expanders."""
+    """Modified configuration tab with unique keys for all interactive elements."""
     st.markdown('<h2 class="section-header">Document Configuration</h2>', unsafe_allow_html=True)
     review_defaults = initialize_review_settings()
     col1, col2 = st.columns(2)
     
     with col1:
-        doc_type = st.selectbox("Document Type", options=list(review_defaults.keys()), key="doc_type")
+        doc_type = st.selectbox(
+            "Document Type", 
+            options=list(review_defaults.keys()), 
+            key="doc_type_select"
+        )
         default_settings = review_defaults[doc_type]
-        venue = st.text_input("Dissemination Venue", placeholder="e.g., Nature, NIH R01, Conference Name")
+        venue = st.text_input(
+            "Dissemination Venue", 
+            placeholder="e.g., Nature, NIH R01, Conference Name",
+            key="venue_input"
+        )
 
     with col2:
-        rating_system = st.radio("Rating System", options=["stars", "nih"], format_func=lambda x: "Star Rating (1-5)" if x == "stars" else "NIH Scale (1-9)", horizontal=True)
-        is_nih_grant = st.checkbox("NIH Grant Review Format", value=True if doc_type == "Grant Proposal" else False)
+        rating_system = st.radio(
+            "Rating System", 
+            options=["stars", "nih"], 
+            format_func=lambda x: "Star Rating (1-5)" if x == "stars" else "NIH Scale (1-9)", 
+            horizontal=True,
+            key="rating_system_radio"
+        )
+        is_nih_grant = st.checkbox(
+            "NIH Grant Review Format", 
+            value=True if doc_type == "Grant Proposal" else False,
+            key="nih_grant_checkbox"
+        )
 
-    uploaded_file = st.file_uploader(f"Upload {doc_type} (PDF format)", type=["pdf"], key="document_upload")
+    uploaded_file = st.file_uploader(
+        f"Upload {doc_type} (PDF format)", 
+        type=["pdf"], 
+        key="document_upload"
+    )
     if uploaded_file:
         col1, col2 = st.columns([3, 1])
         with col1: st.success(f"✅ {uploaded_file.name} uploaded successfully")
         with col2: st.info(f"Size: {uploaded_file.size / 1024:.1f} KB")
 
     st.markdown('<h2 class="section-header">Reviewer Configuration</h2>', unsafe_allow_html=True)
-    num_reviewers = st.number_input("Number of Reviewers", min_value=1, max_value=10, value=default_settings['reviewers'])
+    num_reviewers = st.number_input(
+        "Number of Reviewers", 
+        min_value=1, 
+        max_value=10, 
+        value=default_settings['reviewers'],
+        key="num_reviewers_input"
+    )
     
-    # Use tabs for reviewer configuration instead of expanders
+    # Use tabs for reviewer configuration
     if num_reviewers > 0:
         reviewer_tabs = st.tabs([f"Reviewer {i+1}" for i in range(num_reviewers)])
         reviewer_config = {}
@@ -1146,14 +1174,29 @@ def show_configuration_tab():
             with tab:
                 col1, col2 = st.columns(2)
                 with col1:
-                    expertise = st.text_input("Expertise", value=f"Scientific Expert {i+1}", key=f"expertise_{i}")
+                    expertise = st.text_input(
+                        "Expertise", 
+                        value=f"Scientific Expert {i+1}", 
+                        key=f"expertise_input_{i}"
+                    )
                 with col2:
-                    custom_prompt = st.text_area("Custom Instructions", value=get_default_reviewer_prompt(doc_type), height=150, key=f"prompt_{i}")
+                    custom_prompt = st.text_area(
+                        "Custom Instructions", 
+                        value=get_default_reviewer_prompt(doc_type), 
+                        height=150, 
+                        key=f"prompt_input_{i}"
+                    )
                 reviewer_config[f"reviewer_{i}"] = {"expertise": expertise, "prompt": custom_prompt}
 
-    num_iterations = st.number_input("Number of Discussion Iterations", min_value=1, max_value=5, value=default_settings['iterations'])
+    num_iterations = st.number_input(
+        "Number of Discussion Iterations", 
+        min_value=1, 
+        max_value=5, 
+        value=default_settings['iterations'],
+        key="num_iterations_input"
+    )
 
-    if st.button("🚀 Generate Review", disabled=not uploaded_file):
+    if st.button("🚀 Generate Review", key="generate_review_button", disabled=not uploaded_file):
         if not uploaded_file:
             st.error("❌ Please upload a PDF file first.")
         else:
@@ -1169,11 +1212,11 @@ def show_configuration_tab():
             with st.spinner("📊 Processing review..."):
                 process_review(uploaded_file, num_reviewers)
 
-    # Display current review status using tabs instead of expanders
+    # Display current review status
     if 'current_review' in st.session_state:
         st.markdown("### Current Review Status")
         display_review_results(st.session_state.current_review)
-        
+
 def process_review(uploaded_file, num_reviewers):
     try:
         config = st.session_state.review_config
@@ -1671,7 +1714,7 @@ def extract_points_by_type(text: str, markers: List[str]) -> Set[str]:
     return points
 
 def display_review_results(results: Dict[str, Any]):
-    """Display review results using tabs and containers instead of nested expanders."""
+    """Display review results using tabs and containers with unique keys for all selectboxes."""
     if not results:
         st.warning("No review results to display.")
         return
@@ -1716,12 +1759,17 @@ def display_review_results(results: Dict[str, Any]):
             iteration_tabs.append(f"Iteration {i+1}")
         
         if iteration_tabs:
-            selected_iteration = st.selectbox("Select Iteration", iteration_tabs)
+            # Add unique key for iteration selectbox
+            selected_iteration = st.selectbox(
+                "Select Iteration", 
+                iteration_tabs,
+                key="iteration_selector"
+            )
             iteration_index = int(selected_iteration.split()[-1]) - 1
             current_iteration = results['iterations'][iteration_index]
             
             # Display reviews for selected iteration
-            for review in current_iteration.get('reviews', []):
+            for review_idx, review in enumerate(current_iteration.get('reviews', [])):
                 if review.get('success'):
                     st.markdown(f"### Review by {review['expertise']}")
                     
@@ -1729,10 +1777,11 @@ def display_review_results(results: Dict[str, Any]):
                     sections = extract_review_sections(review['review_text'])
                     if sections:
                         section_names = list(sections.keys())
+                        # Add unique key combining iteration, review, and section
                         selected_section = st.selectbox(
                             "Select Section",
                             section_names,
-                            key=f"section_{review['expertise']}"
+                            key=f"section_select_{iteration_index}_{review_idx}"
                         )
                         
                         st.markdown("---")
