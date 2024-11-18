@@ -1113,27 +1113,43 @@ def show_selected_review():
             mime="text/markdown"
         )
 
+def update_defaults(review_defaults):
+    """Update default settings when document type changes."""
+    doc_type = st.session_state.doc_type_select
+    default_settings = review_defaults[doc_type]
+    st.session_state.config_state['num_reviewers'] = default_settings['reviewers']
+    st.session_state.config_state['num_iterations'] = default_settings['iterations']
+    st.session_state.num_reviewers_input = default_settings['reviewers']
+
 def show_configuration_tab():
-    """Configuration tab with unique keys for all elements."""
+    """Configuration tab with working reviewer controls and generate button."""
     st.markdown('<h2 class="section-header">Document Configuration</h2>', unsafe_allow_html=True)
     review_defaults = initialize_review_settings()
     
-    # Generate unique ID for this configuration instance
-    config_id = str(int(time.time() * 1000))
+    # Initialize session state for configuration if not exists
+    if 'config_state' not in st.session_state:
+        st.session_state.config_state = {
+            'doc_type': list(review_defaults.keys())[0],
+            'num_reviewers': review_defaults[list(review_defaults.keys())[0]]['reviewers'],
+            'num_iterations': review_defaults[list(review_defaults.keys())[0]]['iterations'],
+            'reviewer_config': {}
+        }
     
+    # Document Configuration
     col1, col2 = st.columns(2)
     
     with col1:
         doc_type = st.selectbox(
             "Document Type", 
             options=list(review_defaults.keys()), 
-            key=f"doc_type_select_{config_id}"
+            key="doc_type_select",
+            on_change=lambda: update_defaults(review_defaults)
         )
         default_settings = review_defaults[doc_type]
         venue = st.text_input(
             "Dissemination Venue", 
             placeholder="e.g., Nature, NIH R01, Conference Name",
-            key=f"venue_input_{config_id}"
+            key="venue_input"
         )
 
     with col2:
@@ -1142,89 +1158,26 @@ def show_configuration_tab():
             options=["stars", "nih"], 
             format_func=lambda x: "Star Rating (1-5)" if x == "stars" else "NIH Scale (1-9)", 
             horizontal=True,
-            key=f"rating_system_radio_{config_id}"
+            key="rating_system"
         )
         is_nih_grant = st.checkbox(
             "NIH Grant Review Format", 
             value=True if doc_type == "Grant Proposal" else False,
-            key=f"nih_grant_checkbox_{config_id}"
+            key="nih_grant"
         )
 
     uploaded_file = st.file_uploader(
         f"Upload {doc_type} (PDF format)", 
         type=["pdf"], 
-        key=f"document_upload_{config_id}"
+        key="document_upload"
     )
     if uploaded_file:
         col1, col2 = st.columns([3, 1])
         with col1: st.success(f"✅ {uploaded_file.name} uploaded successfully")
         with col2: st.info(f"Size: {uploaded_file.size / 1024:.1f} KB")
 
+    # Reviewer Configuration
     st.markdown('<h2 class="section-header">Reviewer Configuration</h2>', unsafe_allow_html=True)
-    num_reviewers = st.number_input(
-        "Number of Reviewers", 
-        min_value=1, 
-        max_value=10, 
-        value=default_settings['reviewers'],
-        key=f"num_reviewers_input_{config_id}"
-    )
-    
-    # Use tabs for reviewer configuration
-    if num_reviewers > 0:
-        reviewer_tabs = st.tabs([f"Reviewer {i+1}" for i in range(num_reviewers)])
-        reviewer_config = {}
-        
-        for i, tab in enumerate(reviewer_tabs):
-            with tab:
-                col1, col2 = st.columns(2)
-                with col1:
-                    expertise = st.text_input(
-                        "Expertise", 
-                        value=f"Scientific Expert {i+1}", 
-                        key=f"expertise_input_{config_id}_{i}"
-                    )
-                with col2:
-                    custom_prompt = st.text_area(
-                        "Custom Instructions", 
-                        value=get_default_reviewer_prompt(doc_type), 
-                        height=150, 
-                        key=f"prompt_input_{config_id}_{i}"
-                    )
-                reviewer_config[f"reviewer_{i}"] = {"expertise": expertise, "prompt": custom_prompt}
-
-    num_iterations = st.number_input(
-        "Number of Discussion Iterations", 
-        min_value=1, 
-        max_value=5, 
-        value=default_settings['iterations'],
-        key=f"num_iterations_input_{config_id}"
-    )
-
-    if st.button(
-        "🚀 Generate Review",
-        key=f"generate_review_button_{config_id}",
-        disabled=not uploaded_file
-    ):
-        if not uploaded_file:
-            st.error("❌ Please upload a PDF file first.")
-        else:
-            st.session_state.review_config = {
-                "document_type": doc_type,
-                "venue": venue,
-                "rating_system": rating_system,
-                "is_nih_grant": is_nih_grant,
-                "reviewers": reviewer_config,
-                "num_iterations": num_iterations
-            }
-            st.success("✅ Configuration saved successfully!")
-            with st.spinner("📊 Processing review..."):
-                process_review(uploaded_file, num_reviewers)
-
-    # Display current review status
-    if 'current_review' in st.session_state:
-        st.markdown("### Current Review Status")
-        st.session_state.display_id = config_id  # Store the ID for potential reuse
-        display_review_results(st.session_state.current_review)
 
 def process_review(uploaded_file: Any, num_reviewers: int):
     """Modified process review function that skips figure display."""
@@ -1306,7 +1259,7 @@ def process_review(uploaded_file: Any, num_reviewers: int):
         st.error(f"❌ Error processing review: {str(e)}")
         if st.session_state.get('debug_mode', False):
             st.exception(e)
-            
+
 def show_review_process_tab():
     """Display the review process interface."""
     st.markdown('<h2 class="section-header">Document Review</h2>', unsafe_allow_html=True)
@@ -2293,6 +2246,90 @@ def extract_scores_from_review(review_text: str) -> Dict[str, Union[float, str]]
                     continue
                     
     return scores
+
+def update_num_reviewers():
+        num_reviewers = st.session_state.num_reviewers_input
+        st.session_state.config_state['num_reviewers'] = num_reviewers
+        # Reset reviewer config when number changes
+        st.session_state.config_state['reviewer_config'] = {}
+    
+        num_reviewers = st.number_input(
+            "Number of Reviewers", 
+            min_value=1, 
+            max_value=10, 
+            value=st.session_state.config_state['num_reviewers'],
+            key="num_reviewers_input",
+            on_change=update_num_reviewers
+        )
+        
+        # Reviewer configuration using tabs
+        reviewer_config = {}
+        if num_reviewers > 0:
+            reviewer_tabs = st.tabs([f"Reviewer {i+1}" for i in range(num_reviewers)])
+            
+            for i, tab in enumerate(reviewer_tabs):
+                with tab:
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        expertise = st.text_input(
+                            "Expertise", 
+                            value=f"Scientific Expert {i+1}", 
+                            key=f"expertise_{i}"
+                        )
+                    with col2:
+                        custom_prompt = st.text_area(
+                            "Custom Instructions", 
+                            value=get_default_reviewer_prompt(doc_type), 
+                            height=150, 
+                            key=f"prompt_{i}"
+                        )
+                    reviewer_config[f"reviewer_{i}"] = {
+                        "expertise": expertise,
+                        "prompt": custom_prompt
+                    }
+            
+            st.session_state.config_state['reviewer_config'] = reviewer_config
+
+        # Number of iterations
+        num_iterations = st.number_input(
+            "Number of Discussion Iterations", 
+            min_value=1, 
+            max_value=5, 
+            value=default_settings['iterations'],
+            key="num_iterations"
+        )
+
+        # Generate Review button with proper handling
+        if st.button("🚀 Generate Review", key="generate_review", disabled=not uploaded_file):
+            if not uploaded_file:
+                st.error("❌ Please upload a PDF file first.")
+            else:
+                # Save configuration to session state
+                review_config = {
+                    "document_type": doc_type,
+                    "venue": venue,
+                    "rating_system": rating_system,
+                    "is_nih_grant": is_nih_grant,
+                    "reviewers": reviewer_config,
+                    "num_iterations": num_iterations,
+                    "bias": st.session_state.bias,
+                    "temperature": st.session_state.temperature
+                }
+                st.session_state.review_config = review_config
+                
+                try:
+                    with st.spinner("📊 Processing review..."):
+                        process_review(uploaded_file, num_reviewers)
+                    st.success("✅ Review generated successfully!")
+                except Exception as e:
+                    st.error(f"❌ Error generating review: {str(e)}")
+                    if st.session_state.get('debug_mode', False):
+                        st.exception(e)
+
+        # Display current review status if available
+        if 'current_review' in st.session_state:
+            st.markdown("### Current Review Status")
+            display_review_results(st.session_state.current_review)
 
 def initialize_session_state():
     """Initialize session state variables with default values."""
