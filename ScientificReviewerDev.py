@@ -1114,22 +1114,26 @@ def show_selected_review():
         )
 
 def show_configuration_tab():
-    """Modified configuration tab with unique keys for all interactive elements."""
+    """Configuration tab with unique keys for all elements."""
     st.markdown('<h2 class="section-header">Document Configuration</h2>', unsafe_allow_html=True)
     review_defaults = initialize_review_settings()
+    
+    # Generate unique ID for this configuration instance
+    config_id = str(int(time.time() * 1000))
+    
     col1, col2 = st.columns(2)
     
     with col1:
         doc_type = st.selectbox(
             "Document Type", 
             options=list(review_defaults.keys()), 
-            key="doc_type_select"
+            key=f"doc_type_select_{config_id}"
         )
         default_settings = review_defaults[doc_type]
         venue = st.text_input(
             "Dissemination Venue", 
             placeholder="e.g., Nature, NIH R01, Conference Name",
-            key="venue_input"
+            key=f"venue_input_{config_id}"
         )
 
     with col2:
@@ -1138,18 +1142,18 @@ def show_configuration_tab():
             options=["stars", "nih"], 
             format_func=lambda x: "Star Rating (1-5)" if x == "stars" else "NIH Scale (1-9)", 
             horizontal=True,
-            key="rating_system_radio"
+            key=f"rating_system_radio_{config_id}"
         )
         is_nih_grant = st.checkbox(
             "NIH Grant Review Format", 
             value=True if doc_type == "Grant Proposal" else False,
-            key="nih_grant_checkbox"
+            key=f"nih_grant_checkbox_{config_id}"
         )
 
     uploaded_file = st.file_uploader(
         f"Upload {doc_type} (PDF format)", 
         type=["pdf"], 
-        key="document_upload"
+        key=f"document_upload_{config_id}"
     )
     if uploaded_file:
         col1, col2 = st.columns([3, 1])
@@ -1162,7 +1166,7 @@ def show_configuration_tab():
         min_value=1, 
         max_value=10, 
         value=default_settings['reviewers'],
-        key="num_reviewers_input"
+        key=f"num_reviewers_input_{config_id}"
     )
     
     # Use tabs for reviewer configuration
@@ -1177,14 +1181,14 @@ def show_configuration_tab():
                     expertise = st.text_input(
                         "Expertise", 
                         value=f"Scientific Expert {i+1}", 
-                        key=f"expertise_input_{i}"
+                        key=f"expertise_input_{config_id}_{i}"
                     )
                 with col2:
                     custom_prompt = st.text_area(
                         "Custom Instructions", 
                         value=get_default_reviewer_prompt(doc_type), 
                         height=150, 
-                        key=f"prompt_input_{i}"
+                        key=f"prompt_input_{config_id}_{i}"
                     )
                 reviewer_config[f"reviewer_{i}"] = {"expertise": expertise, "prompt": custom_prompt}
 
@@ -1193,10 +1197,14 @@ def show_configuration_tab():
         min_value=1, 
         max_value=5, 
         value=default_settings['iterations'],
-        key="num_iterations_input"
+        key=f"num_iterations_input_{config_id}"
     )
 
-    if st.button("🚀 Generate Review", key="generate_review_button", disabled=not uploaded_file):
+    if st.button(
+        "🚀 Generate Review",
+        key=f"generate_review_button_{config_id}",
+        disabled=not uploaded_file
+    ):
         if not uploaded_file:
             st.error("❌ Please upload a PDF file first.")
         else:
@@ -1215,9 +1223,11 @@ def show_configuration_tab():
     # Display current review status
     if 'current_review' in st.session_state:
         st.markdown("### Current Review Status")
+        st.session_state.display_id = config_id  # Store the ID for potential reuse
         display_review_results(st.session_state.current_review)
 
-def process_review(uploaded_file, num_reviewers):
+def process_review(uploaded_file: Any, num_reviewers: int):
+    """Modified process review function that skips figure display."""
     try:
         config = st.session_state.review_config
         with st.spinner("Extracting content from PDF..."):
@@ -1230,19 +1240,14 @@ def process_review(uploaded_file, num_reviewers):
         - **Type:** {config['document_type']}
         - **Venue:** {config['venue']}
         - **Pages:** {metadata['total_pages']}
-        - **Figures:** {len(images)}
+        - **Figures:** {len(images)} (not displayed)
         - **Sections:** {len(metadata['sections'])}
         """, unsafe_allow_html=True)
 
         st.markdown("### Section Structure")
         for section in metadata['sections']:
-            with st.expander(f"📄 {section['title']}", expanded=True):
+            with st.expander(f"📄 {section['title']}", expanded=False):
                 st.write(f"Content length: {section['content_length']} characters")
-
-        if images:
-            st.markdown("### Document Figures")
-            for idx, img in enumerate(images):
-                st.image(img, caption=f"Figure {idx+1}", use_container_width=True)
 
         with st.spinner("Initializing review agents..."):
             agents = create_review_agents(n_agents=num_reviewers, review_type=config['document_type'].lower(), include_moderator=num_reviewers > 1)
@@ -1251,12 +1256,21 @@ def process_review(uploaded_file, num_reviewers):
         with progress_container:
             progress_bar = st.progress(0)
             status_text = st.empty()
-            def update_progress(progress, status): progress_bar.progress(int(progress)); status_text.text(f"🔄 {status}")
+            def update_progress(progress, status): 
+                progress_bar.progress(int(progress))
+                status_text.text(f"🔄 {status}")
+            
             results = st.session_state.review_processor.process_review(
-                content=text_content, agents=agents, expertises=[r['expertise'] for r in config['reviewers'].values()],
-                custom_prompts=[r['prompt'] for r in config['reviewers'].values()], review_type=config['document_type'].lower(),
-                venue=config['venue'], num_iterations=config['num_iterations'], progress_callback=update_progress
+                content=text_content,
+                agents=agents,
+                expertises=[r['expertise'] for r in config['reviewers'].values()],
+                custom_prompts=[r['prompt'] for r in config['reviewers'].values()],
+                review_type=config['document_type'].lower(),
+                venue=config['venue'],
+                num_iterations=config['num_iterations'],
+                progress_callback=update_progress
             )
+            
         progress_container.empty()
         st.session_state.current_review = results
         results['document_metadata'] = metadata
@@ -1269,15 +1283,30 @@ def process_review(uploaded_file, num_reviewers):
         with col1:
             if st.button("📥 Download Report", use_container_width=True):
                 report = generate_review_report(results)
-                st.download_button("Save Report", report, f"review_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md", "text/markdown")
+                st.download_button(
+                    label="Save Report",
+                    data=report,
+                    file_name=f"review_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md",
+                    mime="text/markdown"
+                )
         with col2:
             if st.button("📊 Export Analysis", use_container_width=True):
-                analysis_data = {'metadata': metadata, 'analysis': results.get('analysis', {}), 'scores': extract_all_scores(results)}
-                st.download_button("Save Analysis", json.dumps(analysis_data, indent=2), f"analysis_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json", "application/json")
+                analysis_data = {
+                    'metadata': metadata,
+                    'analysis': results.get('analysis', {}),
+                    'scores': extract_all_scores(results)
+                }
+                st.download_button(
+                    label="Save Analysis",
+                    data=json.dumps(analysis_data, indent=2),
+                    file_name=f"analysis_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                    mime="application/json"
+                )
     except Exception as e:
         st.error(f"❌ Error processing review: {str(e)}")
-        if st.session_state.get('debug_mode', False): st.exception(e)
-
+        if st.session_state.get('debug_mode', False):
+            st.exception(e)
+            
 def show_review_process_tab():
     """Display the review process interface."""
     st.markdown('<h2 class="section-header">Document Review</h2>', unsafe_allow_html=True)
@@ -1506,12 +1535,12 @@ def create_review_agents(n_agents: int, review_type: str = "paper", include_mode
     return agents
 
 def display_document_analysis(metadata: Dict[str, Any], images: List[Image.Image], text_content: str):
-    """Display detailed document analysis."""
+    """Display detailed document analysis without figures."""
     st.markdown("### Document Statistics")
     st.markdown(f"""
     - Total Pages: {metadata['total_pages']}
     - Total Sections: {len(metadata['sections'])}
-    - Total Figures: {len(images)}
+    - Total Figures: {len(images)} (not displayed)
     - Word Count: {len(text_content.split())}
     """)
     
@@ -1523,16 +1552,6 @@ def display_document_analysis(metadata: Dict[str, Any], images: List[Image.Image
             - Content Length: {section['content_length']} characters
             - Word Count: {len(section.get('content', '').split())} words
             """)
-    
-    # Figure gallery
-    if images:
-        st.markdown("### Figure Gallery")
-        for idx, img in enumerate(images):
-            st.image(
-                img,
-                caption=f"Figure {idx+1}",
-                use_container_width=True  # Updated parameter
-            )
 
 def extract_all_scores(results: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     """Extract and aggregate all scores from reviews."""
@@ -1714,12 +1733,15 @@ def extract_points_by_type(text: str, markers: List[str]) -> Set[str]:
     return points
 
 def display_review_results(results: Dict[str, Any]):
-    """Display review results using tabs and containers with unique keys for all selectboxes."""
+    """Display review results using tabs and containers with dynamically generated unique keys."""
     if not results:
         st.warning("No review results to display.")
         return
 
-    summary_tab, details_tab = st.tabs(["Summary", "Detailed Review"])
+    # Generate a unique prefix for this display instance
+    display_id = str(int(time.time() * 1000))  # Use millisecond timestamp as unique identifier
+    
+    summary_tab, details_tab = st.tabs([f"Summary_{display_id}", f"Details_{display_id}"])
     
     with summary_tab:
         # Display overall scores
@@ -1727,12 +1749,16 @@ def display_review_results(results: Dict[str, Any]):
         if scores['overall']:
             st.markdown("### Overall Scores")
             cols = st.columns(len(scores['overall']))
-            for col, (category, score) in zip(cols, scores['overall'].items()):
+            for idx, (col, (category, score)) in enumerate(zip(cols, scores['overall'].items())):
                 with col:
                     if isinstance(score, str) and '★' in score:
                         st.markdown(f"**{category.title()}**\n\n{score}")
                     else:
-                        st.metric(label=category.title(), value=f"{score:.1f}")
+                        st.metric(
+                            label=category.title(),
+                            value=f"{score:.1f}",
+                            key=f"metric_{display_id}_{idx}"
+                        )
         
         # Display consensus points
         consensus = extract_consensus_points(results)
@@ -1759,11 +1785,10 @@ def display_review_results(results: Dict[str, Any]):
             iteration_tabs.append(f"Iteration {i+1}")
         
         if iteration_tabs:
-            # Add unique key for iteration selectbox
             selected_iteration = st.selectbox(
                 "Select Iteration", 
                 iteration_tabs,
-                key="iteration_selector"
+                key=f"iteration_selector_{display_id}"
             )
             iteration_index = int(selected_iteration.split()[-1]) - 1
             current_iteration = results['iterations'][iteration_index]
@@ -1777,11 +1802,10 @@ def display_review_results(results: Dict[str, Any]):
                     sections = extract_review_sections(review['review_text'])
                     if sections:
                         section_names = list(sections.keys())
-                        # Add unique key combining iteration, review, and section
                         selected_section = st.selectbox(
                             "Select Section",
                             section_names,
-                            key=f"section_select_{iteration_index}_{review_idx}"
+                            key=f"section_select_{display_id}_{iteration_index}_{review_idx}"
                         )
                         
                         st.markdown("---")
