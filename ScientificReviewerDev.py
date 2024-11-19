@@ -2415,7 +2415,7 @@ def main_content():
             0: Unbiased/objective
             1: Positive and enthusiastic
             2: Extremely positive and passionate
-            """
+            """"""
         )
         
         # View previous reviews
