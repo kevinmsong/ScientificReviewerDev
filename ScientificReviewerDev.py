@@ -3,7 +3,7 @@ import streamlit as st
 # Must be the first Streamlit command
 st.set_page_config(
     page_title="Multi-Agent Scientific Review System",
-    page_icon="📝",
+    page_icon="📝",page_icon="📝",page_icon="📝",page_icon="📝",page_icon="📝",page_icon="📝",page_icon="📝",page_icon="📝",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -1857,7 +1857,7 @@ def display_iteration_results(iteration: Dict[str, Any]):
             st.error(f"Error in review by {review['expertise']}: {review.get('error', 'Unknown error')}")
 
 def display_moderation_results(moderation: str):
-    """Display moderator analysis with enhanced formatting.""""""Display moderator analysis with enhanced formatting."""
+    """Display moderator analysis with enhanced formatting."""
     sections = split_moderation_sections(moderation)
     
     # Display sections using tabs
