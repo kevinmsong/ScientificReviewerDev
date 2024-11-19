@@ -4,7 +4,7 @@ import streamlit as st
 st.set_page_config(
     page_title="Multi-Agent Scientific Review System",
     page_icon="📝",
-    layout="wide",
+    layout="wide",layout="wide",
     initial_sidebar_state="expanded"
 )
 
@@ -2429,7 +2429,7 @@ def main_content():
                 "Model Temperature",
                 min_value=0.0,
                 max_value=1.0,
-                value=st.session_state.temperature,value=st.session_state.temperature,
+                value=st.session_state.temperature,
                 step=0.1,
                 help="Controls randomness in model responses"
             )
