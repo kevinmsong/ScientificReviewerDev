@@ -4,13 +4,13 @@ import streamlit as st
 st.set_page_config(
     page_title="Multi-Agent Scientific Review System",
     page_icon="📝",
-    layout="wide",layout="wide",
+    layout="wide",
     initial_sidebar_state="expanded"
 )
 
 import logging
 from openai import OpenAI
-from langchain_openai import ChatOpenAI
+from langchain_openai import ChatOpenAIfrom langchain_openai import ChatOpenAI
 from langchain.schema import HumanMessage
 import fitz
 import io
