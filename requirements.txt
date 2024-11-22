@@ -1,4 +1,5 @@
 streamlit>=1.32.0
+langchain>=0.1.0
 langchain-openai>=0.0.2
 openai>=1.12.0
 PyMuPDF>=1.23.8
