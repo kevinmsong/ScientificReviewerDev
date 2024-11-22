@@ -351,6 +351,40 @@ def display_review_sections(sections: Dict[str, str]):
             st.markdown(sections[section])
             st.markdown("---")
 
+def display_moderator_sections(content: str):
+    """Display moderator summary sections with consistent formatting."""
+    sections = parse_moderator_sections(content)
+    
+    section_order = [
+        'agreement', 
+        'contention', 
+        'evolution', 
+        'synthesis'
+    ]
+    
+    icons = {
+        'agreement': '🤝',
+        'contention': '⚖️',
+        'evolution': '📈',
+        'synthesis': '🎯'
+    }
+    
+    titles = {
+        'agreement': 'Points of Agreement',
+        'contention': 'Points of Contention',
+        'evolution': 'Discussion Evolution',
+        'synthesis': 'Final Synthesis'
+    }
+    
+    for section in section_order:
+        if section in sections:
+            st.markdown(f"### {icons[section]} {titles[section]}")
+            st.markdown(sections[section])
+            st.markdown("---")
+
+    if not any(section in sections for section in section_order):
+        st.markdown(content)  # Fallback: display raw content if parsing fails
+
 def display_review_results(results: Dict[str, Any]):
     """Display review results with improved formatting."""
     st.markdown("## Review Results")
@@ -1091,7 +1125,7 @@ def main():
             expertise_category = st.selectbox(
                 "Expertise Category",
                 list(EXPERTISE_OPTIONS.keys()),
-                key=f"cat_{i}"import json
+                key=f"cat_{i}"
             )
         
         with col2:
