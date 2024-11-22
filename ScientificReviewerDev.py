@@ -8,7 +8,7 @@ import fitz
 import json
 from datetime import datetime
 from typing import Dict, List, Any, Tuple
-from collections import defaultdict
+import re
 
 # Configure logging and OpenAI client
 logging.basicConfig(level=logging.INFO)
@@ -287,8 +287,66 @@ def parse_moderator_sections(content: str) -> Dict[str, str]:
     
     return sections
 
+def parse_slide_review(content: str) -> Dict[str, str]:
+    """Parse slide review content into sections."""
+    sections = {}
+    section_markers = {
+        'SLIDE PURPOSE': '🎯 Slide Purpose',
+        'CONTENT ANALYSIS': '📝 Content Analysis',
+        'VISUAL DESIGN': '🎨 Visual Design',
+        'COMMUNICATION': '💬 Communication',
+        'RECOMMENDATIONS': '📋 Recommendations'
+    }
+    
+    for marker, title in section_markers.items():
+        if marker in content:
+            start = content.find(marker)
+            end = len(content)
+            for next_marker in section_markers:
+                next_pos = content.find(next_marker, start + len(marker))
+                if next_pos != -1 and next_pos < end:
+                    end = next_pos
+            section_content = content[start + len(marker):end].strip(':').strip()
+            if section_content:
+                sections[title] = section_content
+    
+    return sections
+
+def display_review_sections(sections: Dict[str, str]):
+    """Display review sections with consistent formatting."""
+    section_order = [
+        'response', 'analysis', 'significance', 'innovation', 
+        'approach', 'scoring', 'recommendations'
+    ]
+    
+    icons = {
+        'response': '💬',
+        'analysis': '📝',
+        'significance': '🎯',
+        'innovation': '💡',
+        'approach': '🔍',
+        'scoring': '⭐',
+        'recommendations': '📋'
+    }
+    
+    titles = {
+        'response': 'Response to Previous Reviews',
+        'analysis': 'Section Analysis',
+        'significance': 'Significance Evaluation',
+        'innovation': 'Innovation Assessment',
+        'approach': 'Approach Analysis',
+        'scoring': 'Scoring',
+        'recommendations': 'Recommendations'
+    }
+    
+    for section in section_order:
+        if section in sections:
+            st.markdown(f"### {icons[section]} {titles[section]}")
+            st.markdown(sections[section])
+            st.markdown("---")
+
 def display_review_results(results: Dict[str, Any]):
-    """Display review results with improved formatting and moderator summary."""
+    """Display review results with improved formatting."""
     st.markdown("## Review Results")
     
     if not results.get('iterations'):
@@ -298,78 +356,55 @@ def display_review_results(results: Dict[str, Any]):
     # Create tabs for iterations
     tabs = st.tabs([f"Iteration {i+1}" for i in range(len(results['iterations']))])
     
-    # Display reviews for each iteration
     for idx, (tab, iteration) in enumerate(zip(tabs, results['iterations'])):
         with tab:
-            # For each reviewer in this iteration
             for review in iteration['reviews']:
                 with st.expander(f"Review by {review['reviewer']}", expanded=True):
                     if review.get('error', False):
                         st.error(review['content'])
+                    elif review.get('is_presentation', False):
+                        # Display presentation review
+                        st.markdown("### 📊 Overall Presentation Analysis")
+                        st.markdown(review['content'])
+                        st.markdown("---")
+                        
+                        st.markdown("### 🎯 Slide-by-Slide Review")
+                        slide_tabs = st.tabs([f"Slide {sr['slide_number']}" for sr in review['slide_reviews']])
+                        
+                        for slide_tab, slide_review in zip(slide_tabs, review['slide_reviews']):
+                            with slide_tab:
+                                if slide_review.get('error'):
+                                    st.error(slide_review['error'])
+                                else:
+                                    sections = parse_slide_review(slide_review['content'])
+                                    
+                                    for section_title, content in sections.items():
+                                        st.markdown(f"#### {section_title}")
+                                        st.markdown(content)
+                                        st.markdown("---")
+                                    
+                                    if slide_review.get('scores'):
+                                        st.markdown("#### Scores")
+                                        for category, score in slide_review['scores'].items():
+                                            st.markdown(f"**{category}:** {score}")
+                        
+                        st.markdown("### 📈 Presentation Structure")
+                        for item in review['structure_analysis']:
+                            st.markdown(f"**Slide {item['slide_number']} ({item['content_type']}):**")
+                            if item.get('key_points'):
+                                for point in item['key_points']:
+                                    st.markdown(f"- {point}")
                     else:
-                        content = review['content']
-                        sections = parse_review_sections(content)
-                        
-                        # Display each section with proper formatting
-                        if sections.get('response'):
-                            st.markdown("### 💬 Response to Previous Reviews")
-                            st.markdown(sections['response'])
-                            st.markdown("---")
-                        
-                        if sections.get('analysis'):
-                            st.markdown("### 📝 Section Analysis")
-                            st.markdown(sections['analysis'])
-                            st.markdown("---")
-                        
-                        if sections.get('significance'):
-                            st.markdown("### 🎯 Significance Evaluation")
-                            st.markdown(sections['significance'])
-                            st.markdown("---")
-                        
-                        if sections.get('innovation'):
-                            st.markdown("### 💡 Innovation Assessment")
-                            st.markdown(sections['innovation'])
-                            st.markdown("---")
-                        
-                        if sections.get('approach'):
-                            st.markdown("### 🔍 Approach Analysis")
-                            st.markdown(sections['approach'])
-                            st.markdown("---")
-                        
-                        if sections.get('scoring'):
-                            st.markdown("### ⭐ Scoring")
-                            st.markdown(sections['scoring'])
-                            st.markdown("---")
-                        
-                        if sections.get('recommendations'):
-                            st.markdown("### 📋 Recommendations")
-                            st.markdown(sections['recommendations'])
-                        
-                        st.markdown(f"*Reviewed at: {review['timestamp']}*")
+                        # Display regular review content
+                        sections = parse_review_sections(review['content'])
+                        display_review_sections(sections)
+                    
+                    st.markdown(f"*Reviewed at: {review['timestamp']}*")
     
     # Display moderator summary
     if 'moderator_summary' in results and results['moderator_summary']:
         st.markdown("## 🎯 Moderator Analysis")
-        moderator_sections = parse_moderator_sections(results['moderator_summary'])
-        
-        if moderator_sections.get('agreement'):
-            st.markdown("### 🤝 Points of Agreement")
-            st.markdown(moderator_sections['agreement'])
-            st.markdown("---")
-        
-        if moderator_sections.get('contention'):
-            st.markdown("### ⚖️ Points of Contention")
-            st.markdown(moderator_sections['contention'])
-            st.markdown("---")
-        
-        if moderator_sections.get('evolution'):
-            st.markdown("### 📈 Discussion Evolution")
-            st.markdown(moderator_sections['evolution'])
-            st.markdown("---")
-        
-        if moderator_sections.get('synthesis'):
-            st.markdown("### 🎯 Final Synthesis")
-            st.markdown(moderator_sections['synthesis'])
+        display_moderator_sections(results['moderator_summary'])
 
 class ModeratorAgent:
     def __init__(self, model="gpt-4"):
@@ -441,40 +476,44 @@ class ReviewManager:
     def process_review(self, content: str, sections: List[Dict[str, Any]], config: Dict[str, Any]) -> Dict[str, Any]:
         """Process document review with multiple iterations and moderation."""
         iterations = []
-        all_reviews = []  # Keep track of all reviews for context
+        all_reviews = []
         
         try:
+            # Check if it's a PowerPoint file
+            is_presentation = any(section.get('type') == 'slide' for section in sections)
+            if is_presentation:
+                config['doc_type'] = "Presentation"  # Override doc_type for presentations
+            
             for iteration in range(config['iterations']):
                 iteration_reviews = []
-                
-                # Create context from previous reviews
                 previous_context = self._create_previous_context(all_reviews)
                 
                 for reviewer in config['reviewers']:
                     try:
-                        # Calculate valid temperature based on bias
                         temperature = self._calculate_temperature(config.get('bias', 0))
-                        
-                        # Use appropriate model based on document type
                         model = self.model_config.get(config['doc_type'], "gpt-4")
                         
-                        agent = ChatOpenAI(
-                            temperature=temperature,
-                            openai_api_key=st.secrets["openai_api_key"],
-                            model=model
-                        )
-                        
-                        # Process content based on document type and structure
-                        if config['doc_type'].lower() == "poster" or sections[0].get('type') == 'slide':
-                            review = self._process_sectioned_content(
-                                agent=agent,
+                        if is_presentation:
+                            presentation_reviewer = PresentationReviewer(model=model)
+                            review_results = presentation_reviewer.review_presentation(
                                 sections=sections,
-                                reviewer=reviewer,
-                                config=config,
-                                iteration=iteration + 1,
-                                previous_context=previous_context
+                                expertise=reviewer['expertise']
                             )
+                            
+                            review = {
+                                'reviewer': reviewer['expertise'],
+                                'content': review_results['overall_review']['content'],
+                                'slide_reviews': review_results['slide_reviews'],
+                                'structure_analysis': review_results['structure_analysis'],
+                                'timestamp': datetime.now().isoformat(),
+                                'is_presentation': True
+                            }
                         else:
+                            agent = ChatOpenAI(
+                                temperature=temperature,
+                                openai_api_key=st.secrets["openai_api_key"],
+                                model=model
+                            )
                             review = self._process_full_content(
                                 agent=agent,
                                 content=content,
@@ -501,7 +540,6 @@ class ReviewManager:
                     'reviews': iteration_reviews
                 })
             
-            # Generate moderator summary
             moderator_summary = self.moderator.summarize_discussion(iterations)
             
             return {
@@ -509,7 +547,8 @@ class ReviewManager:
                 'moderator_summary': moderator_summary,
                 'config': config,
                 'timestamp': datetime.now().isoformat(),
-                'doc_type': config['doc_type']
+                'doc_type': config['doc_type'],
+                'is_presentation': is_presentation
             }
             
         except Exception as e:
