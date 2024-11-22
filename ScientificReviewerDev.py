@@ -175,59 +175,80 @@ class ReviewManager:
         iterations = []
         all_reviews = []  # Keep track of all reviews for context
         
-        for iteration in range(config['iterations']):
-            iteration_reviews = []
+        try:
+            for iteration in range(config['iterations']):
+                # Debug logging
+                st.write(f"Debug - Processing iteration {iteration + 1}")
+                
+                iteration_reviews = []
+                
+                # Create context from previous reviews
+                previous_context = ""
+                if all_reviews:
+                    previous_context = "\n\nPrevious reviews:\n" + \
+                        "\n".join([f"Reviewer {r['reviewer']}: {r['content']}" 
+                                 for r in all_reviews])
+                
+                for reviewer in config['reviewers']:
+                    try:
+                        agent = ChatOpenAI(
+                            temperature=0.1 + config.get('bias', 0) * 0.1,
+                            openai_api_key=st.secrets["openai_api_key"],
+                            model="gpt-4"
+                        )
+                        
+                        prompt = self._create_review_prompt(
+                            doc_type=config['doc_type'],
+                            expertise=reviewer['expertise'],
+                            scoring_type=config['scoring'],
+                            iteration=iteration + 1,
+                            previous_context=previous_context
+                        )
+                        
+                        response = agent.invoke([HumanMessage(content=f"{prompt}\n\nContent:\n{content}")])
+                        
+                        review = {
+                            'reviewer': reviewer['expertise'],
+                            'content': response.content,
+                            'timestamp': datetime.now().isoformat()
+                        }
+                        
+                        # Debug logging
+                        st.write(f"Debug - Got review from {reviewer['expertise']}")
+                        
+                        iteration_reviews.append(review)
+                        all_reviews.append(review)
+                        
+                    except Exception as e:
+                        st.error(f"Error in review by {reviewer['expertise']}: {str(e)}")
+                
+                iterations.append({
+                    'iteration_number': iteration + 1,
+                    'reviews': iteration_reviews
+                })
             
-            # Create context from previous reviews
-            previous_context = ""
-            if all_reviews:
-                previous_context = "\n\nPrevious reviews:\n" + \
-                    "\n".join([f"Reviewer {r['reviewer']}: {r['content']}" for r in all_reviews])
+            # Generate moderator summary
+            moderator = ModeratorAgent()
+            moderator_summary = moderator.summarize_discussion(iterations)
             
-            for reviewer in config['reviewers']:
-                try:
-                    agent = ChatOpenAI(
-                        temperature=0.1 + config.get('bias', 0) * 0.1,
-                        openai_api_key=api_key,
-                        model=self.model
-                    )
-                    
-                    prompt = self._create_review_prompt(
-                        doc_type=config['doc_type'],
-                        expertise=reviewer['expertise'],
-                        scoring_type=config['scoring'],
-                        iteration=iteration + 1,
-                        previous_context=previous_context
-                    )
-                    
-                    response = agent.invoke([HumanMessage(content=f"{prompt}\n\nContent:\n{content}")])
-                    review = {
-                        'reviewer': reviewer['expertise'],
-                        'content': response.content,
-                        'timestamp': datetime.now().isoformat()
-                    }
-                    
-                    iteration_reviews.append(review)
-                    all_reviews.append(review)
-                    
-                except Exception as e:
-                    logging.error(f"Error in review process: {e}")
+            results = {
+                'iterations': iterations,
+                'moderator_summary': moderator_summary,
+                'config': config,
+                'timestamp': datetime.now().isoformat(),
+                'doc_type': config['doc_type']
+            }
             
-            iterations.append({
-                'iteration_number': iteration + 1,
-                'reviews': iteration_reviews
-            })
-        
-        # Generate moderator summary
-        moderator_summary = self.moderator.summarize_discussion(iterations)
-        
-        return {
-            'iterations': iterations,
-            'moderator_summary': moderator_summary,
-            'config': config,
-            'timestamp': datetime.now().isoformat(),
-            'doc_type': config['doc_type']
-        }
+            # Debug logging
+            st.write("Debug - Final results structure:", 
+                    {k: type(v) for k, v in results.items()})
+            
+            return results
+            
+        except Exception as e:
+            st.error(f"Error in review process: {str(e)}")
+            st.exception(e)
+            raise
     
     def _create_review_prompt(self, doc_type: str, expertise: str, scoring_type: str, 
                             iteration: int, previous_context: str) -> str:
@@ -307,88 +328,56 @@ def extract_pdf_content(pdf_file) -> str:
 
 def display_review_results(results: Dict[str, Any]):
     """Display review results with improved formatting and moderator summary."""
-    if not results.get('iterations'):
-        st.warning("No review results to display.")
-        return
-
     st.markdown("## Review Results")
     
-    # Create tabs for iterations
-    iteration_tabs = st.tabs([f"Iteration {i+1}" for i in range(len(results['iterations']))])
+    # Debug logging
+    st.write("Debug - Results structure:", results.keys())
+    
+    if not results.get('iterations'):
+        st.warning("No review results available.")
+        return
+    
+    # Show iteration tabs
+    tab_names = [f"Iteration {i+1}" for i in range(len(results['iterations']))]
+    tabs = st.tabs(tab_names)
     
     # Display reviews for each iteration
-    for idx, (tab, iteration) in enumerate(zip(iteration_tabs, results['iterations'])):
+    for idx, (tab, iteration) in enumerate(zip(tabs, results['iterations'])):
         with tab:
             st.markdown(f"### Iteration {idx + 1} Reviews")
             
-            # Display each review in this iteration
+            # Debug logging
+            st.write(f"Debug - Number of reviews in iteration {idx + 1}:", 
+                    len(iteration['reviews']))
+            
+            # Display each review in current iteration
             for review in iteration['reviews']:
+                st.write("Debug - Review keys:", review.keys())
+                
                 with st.expander(f"Review by {review['reviewer']}", expanded=True):
-                    # Display raw content first as fallback
-                    content = review['content']
-                    
-                    # Try to parse and format sections
-                    if "RESPONSE TO PREVIOUS REVIEWS" in content:
-                        st.markdown("#### Response to Previous Reviews")
-                        response_end = content.find("2. ")
-                        if response_end != -1:
-                            st.markdown(content[content.find("RESPONSE"):response_end])
-                    
-                    if "SECTION-BY-SECTION ANALYSIS" in content:
-                        st.markdown("#### Section Analysis")
-                        analysis_start = content.find("SECTION-BY-SECTION ANALYSIS")
-                        analysis_end = content.find("3. SCORING") if "3. SCORING" in content else len(content)
-                        st.markdown(content[analysis_start:analysis_end])
-                    
-                    if "SCORING" in content:
-                        st.markdown("#### Scores")
-                        scores_start = content.find("SCORING")
-                        scores_end = content.find("4. RECOMMENDATIONS") if "4. RECOMMENDATIONS" in content else len(content)
-                        st.markdown(content[scores_start:scores_end])
-                    
-                    if "RECOMMENDATIONS" in content:
-                        st.markdown("#### Recommendations")
-                        recs_start = content.find("RECOMMENDATIONS")
-                        st.markdown(content[recs_start:])
-                    
-                    # If no sections found, display entire content
-                    if not any(section in content for section in ["RESPONSE", "SECTION-BY-SECTION", "SCORING", "RECOMMENDATIONS"]):
-                        st.markdown(content)
-                    
-                    st.markdown(f"*Reviewed at: {review['timestamp']}*")
+                    st.markdown("#### Raw Review Content")
+                    st.markdown(review.get('content', 'No content available'))
+                    st.markdown(f"*Timestamp: {review.get('timestamp', 'No timestamp')}*")
             
             st.markdown("---")
     
-    # Display moderator summary after all iterations
+    # Display moderator analysis if available
     if 'moderator_summary' in results and results['moderator_summary']:
         st.markdown("## Moderator Analysis")
+        mod_summary = results['moderator_summary']
         
-        moderator_content = results['moderator_summary']
-        
-        # Split and display moderator sections
-        sections = [
-            ("KEY POINTS OF AGREEMENT", "🤝 Key Points of Agreement"),
-            ("POINTS OF CONTENTION", "⚖️ Points of Contention"),
-            ("DISCUSSION EVOLUTION", "📈 Discussion Evolution"),
-            ("FINAL SYNTHESIS", "🎯 Final Synthesis")
-        ]
-        
-        for section_marker, section_title in sections:
-            if section_marker in moderator_content:
-                st.markdown(f"### {section_title}")
-                start_idx = moderator_content.find(section_marker)
-                end_idx = moderator_content.find("\n\n", start_idx)
-                if end_idx == -1:  # Last section
-                    end_idx = len(moderator_content)
-                section_text = moderator_content[start_idx:end_idx]
-                # Remove the section header from the content
-                section_text = section_text.replace(section_marker + ":", "").strip()
-                st.markdown(section_text)
+        # Show moderator content sections
+        for section in ['KEY POINTS OF AGREEMENT', 'POINTS OF CONTENTION', 
+                       'DISCUSSION EVOLUTION', 'FINAL SYNTHESIS']:
+            if section in mod_summary:
+                st.markdown(f"### {section.title()}")
+                start = mod_summary.find(section) + len(section)
+                end = mod_summary.find('\n\n', start)
+                if end == -1:
+                    end = len(mod_summary)
+                content = mod_summary[start:end].strip(':').strip()
+                st.markdown(content)
                 st.markdown("---")
-        
-        # Fallback: if structured parsing fails, show raw content
-        if not any(marker in moderator_content for marker, _ in sections):
-            st.markdown(moderator_content)
 
 def main():
     st.title("Scientific Review System")
