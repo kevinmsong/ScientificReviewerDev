@@ -2,15 +2,15 @@ import streamlit as st
 import logging
 from openai import OpenAI
 from langchain_openai import ChatOpenAI
-from langchain.schema import HumanMessage
+from langchain_core.messages import HumanMessage  # Updated import
 import fitz
-import json
+import jsonimport json
 from datetime import datetime
 from typing import Dict, List, Any
 from collections import defaultdict
 
 # Configure logging and OpenAI client
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO)logging.basicConfig(level=logging.INFO)
 api_key = st.secrets["openai_api_key"]
 client = OpenAI(api_key=api_key)
 
