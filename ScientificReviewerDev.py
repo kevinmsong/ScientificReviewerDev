@@ -122,6 +122,12 @@ REVIEW_DEFAULTS = {
         "iterations": 1,
         "scoring": "stars",
         "scale": "1-5 stars"
+    },
+    "Presentation": {
+        "reviewers": 2,
+        "iterations": 1,
+        "scoring": "stars",
+        "scale": "1-5 stars"
     }
 }
 
@@ -1024,7 +1030,8 @@ def main():
     with col1:
         doc_type = st.selectbox(
             "Document Type",
-            ["Paper", "Grant", "Poster"]
+            ["Paper", "Grant", "Poster", "Presentation"],
+            help="Select 'Presentation' for PowerPoint files"
         )
         
         venue = st.text_input(
@@ -1098,16 +1105,26 @@ def main():
     
     # Document upload
     st.markdown("## Document Upload")
+    file_type_help = """
+    - PDF files: Papers, Grants, and Posters
+    - PowerPoint (.pptx): Presentations for slide-by-slide review
+    """
     uploaded_file = st.file_uploader(
         "Upload Document", 
         type=["pdf", "pptx"],
-        help="Upload a PDF or PowerPoint file for review"
+        help=file_type_help
     )
     
     if uploaded_file:
         try:
             # Extract content with structure
             file_type = uploaded_file.name.split('.')[-1].lower()
+            
+            # Auto-set document type based on file type
+            if file_type == "pptx" and doc_type != "Presentation":
+                st.info("Automatically setting document type to 'Presentation' for PowerPoint file.")
+                doc_type = "Presentation"
+                
             with st.spinner(f"Extracting {file_type.upper()} content..."):
                 content, sections = extract_document_content(uploaded_file, file_type)
             
