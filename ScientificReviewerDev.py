@@ -119,7 +119,7 @@ REVIEW_DEFAULTS = {
 }
 
 class ModeratorAgent:
-    def __init__(self, model="o"):
+    def __init__(self, model="gpt-4o"):
         self.model = ChatOpenAI(
             temperature=0.0,  # Keep moderator objective
             openai_api_key=st.secrets["openai_api_key"],
@@ -319,3 +319,207 @@ def extract_pdf_content(pdf_file) -> str:
     try:
         pdf_document = fitz.open(stream=pdf_file.read(), filetype="pdf")
         text_content = ""
+        
+        for page in pdf_document:
+            text_content += page.get_text()
+            
+        return text_content.strip()
+    except Exception as e:
+        raise Exception(f"Error processing PDF: {str(e)}")
+
+def display_review_results(results: Dict[str, Any]):
+    """Display review results with improved formatting and moderator summary."""
+    st.markdown("## Review Results")
+    
+    if not results.get('iterations'):
+        st.warning("No review results available.")
+        return
+    
+    # Create tabs for iterations
+    tabs = st.tabs([f"Iteration {i+1}" for i in range(len(results['iterations']))])
+    
+    # Display reviews for each iteration
+    for idx, (tab, iteration) in enumerate(zip(tabs, results['iterations'])):
+        with tab:
+            st.markdown(f"### Iteration {idx + 1} Reviews")
+            
+            # Display each review in current iteration
+            for review in iteration['reviews']:
+                with st.expander(f"Review by {review['reviewer']}", expanded=True):
+                    if review.get('error', False):
+                        st.error(review['content'])
+                    else:
+                        content = review['content']
+                        
+                        # Display each section with headers
+                        sections = {
+                            "RESPONSE TO PREVIOUS REVIEWS": "💬 Response to Previous Reviews",
+                            "SECTION-BY-SECTION ANALYSIS": "📝 Section Analysis",
+                            "SIGNIFICANCE EVALUATION": "🎯 Significance Evaluation",
+                            "INNOVATION ASSESSMENT": "💡 Innovation Assessment",
+                            "APPROACH ANALYSIS": "🔍 Approach Analysis",
+                            "SCORING": "⭐ Scoring",
+                            "RECOMMENDATIONS": "📋 Recommendations"
+                        }
+                        
+                        for section_key, section_title in sections.items():
+                            if section_key in content:
+                                st.markdown(f"#### {section_title}")
+                                start = content.find(section_key)
+                                end = content.find("\n\n", start)
+                                if end == -1:
+                                    end = len(content)
+                                section_content = content[start:end].replace(f"{section_key}:", "").strip()
+                                st.markdown(section_content)
+                                st.markdown("---")
+                        
+                        st.markdown(f"*Reviewed at: {review['timestamp']}*")
+    
+    # Display moderator summary
+    if 'moderator_summary' in results and results['moderator_summary']:
+        st.markdown("## 🎯 Moderator Analysis")
+        
+        moderator_sections = {
+            "KEY POINTS OF AGREEMENT": "🤝 Points of Agreement",
+            "POINTS OF CONTENTION": "⚖️ Points of Contention",
+            "DISCUSSION EVOLUTION": "📈 Discussion Evolution",
+            "FINAL SYNTHESIS": "🎯 Final Synthesis"
+        }
+        
+        mod_summary = results['moderator_summary']
+        for section_key, section_title in moderator_sections.items():
+            if section_key in mod_summary:
+                st.markdown(f"### {section_title}")
+                start = mod_summary.find(section_key)
+                end = mod_summary.find("\n\n", start)
+                if end == -1:
+                    end = len(mod_summary)
+                content = mod_summary[start:end].replace(f"{section_key}:", "").strip()
+                st.markdown(content)
+                st.markdown("---")
+
+def main():
+    st.title("Scientific Review System")
+    
+    # Main configuration area
+    st.markdown("## Document Configuration")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        doc_type = st.selectbox(
+            "Document Type",
+            list(REVIEW_DEFAULTS.keys())
+        )
+        
+        venue = st.text_input(
+            "Dissemination Venue",
+            placeholder="e.g., Nature, NIH R01, Conference Name"
+        )
+    
+    with col2:
+        scoring_system = st.radio(
+            "Scoring System",
+            ["stars", "nih"],
+            format_func=lambda x: "Star Rating (1-5)" if x == "stars" else "NIH Scale (1-9)"
+        )
+    
+    # Reviewer configuration
+    st.markdown("## Reviewer Configuration")
+    default_settings = REVIEW_DEFAULTS[doc_type]
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        num_reviewers = st.number_input(
+            "Number of Reviewers",
+            min_value=1,
+            max_value=10,
+            value=default_settings['reviewers']
+        )
+    
+    with col2:
+        num_iterations = st.number_input(
+            "Number of Iterations",
+            min_value=1,
+            max_value=10,
+            value=default_settings['iterations']
+        )
+    
+    with col3:
+        reviewer_bias = st.select_slider(
+            "Reviewer Bias",
+            options=[-2, -1, 0, 1, 2],
+            value=0,
+            format_func=lambda x: {
+                -2: "Extremely Negative",
+                -1: "Somewhat Negative",
+                0: "Unbiased",
+                1: "Somewhat Positive",
+                2: "Extremely Positive"
+            }[x]
+        )
+    
+    # Reviewer expertise selection
+    reviewers = []
+    for i in range(num_reviewers):
+        st.markdown(f"### Reviewer {i+1}")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            expertise_category = st.selectbox(
+                "Expertise Category",
+                list(EXPERTISE_OPTIONS.keys()),
+                key=f"cat_{i}"
+            )
+        
+        with col2:
+            expertise = st.selectbox(
+                "Specific Expertise",
+                EXPERTISE_OPTIONS[expertise_category],
+                key=f"exp_{i}"
+            )
+        
+        reviewers.append({"expertise": expertise})
+    
+    # Document upload
+    st.markdown("## Document Upload")
+    uploaded_file = st.file_uploader("Upload Document (PDF)", type=["pdf"])
+    
+    if uploaded_file:
+        try:
+            # Extract content
+            with st.spinner("Extracting document content..."):
+                content = extract_pdf_content(uploaded_file)
+            
+            # Process review
+            if st.button("Generate Review", type="primary"):
+                config = {
+                    "doc_type": doc_type,
+                    "venue": venue,
+                    "scoring": scoring_system,
+                    "reviewers": reviewers,
+                    "iterations": num_iterations,
+                    "bias": reviewer_bias
+                }
+                
+                with st.spinner("Generating reviews..."):
+                    review_manager = ReviewManager()
+                    results = review_manager.process_review(
+                        content=content,
+                        config=config
+                    )
+                    
+                    display_review_results(results)
+                    
+                    # Download button for results
+                    st.download_button(
+                        label="Download Review Report",
+                        data=json.dumps(results, indent=2),
+                        file_name=f"review_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                        mime="application/json"
+                    )
+                    
+        except Exception as e:
+            st.error(f"Error: {str(e)}")
+
+if __name__ == "__main__":
+    main()
