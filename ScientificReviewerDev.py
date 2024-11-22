@@ -225,7 +225,7 @@ def extract_pptx_content(pptx_file) -> tuple[str, List[Dict[str, Any]]]:
         raise Exception(f"Error processing PowerPoint: {str(e)}")
 
 def parse_review_sections(content: str) -> Dict[str, str]:
-    """Parse review content into structured sections."""
+    """Parse review content into structured sections with cleaned formatting."""
     sections = {}
     
     # Define section markers and their keys
@@ -255,6 +255,12 @@ def parse_review_sections(content: str) -> Dict[str, str]:
                 next_section_start = len(content)
             
             section_content = content[start + len(marker):next_section_start].strip(':').strip()
+            
+            # Clean up the content
+            section_content = re.sub(r'\*\*(.*?)\*\*', r'\1', section_content)  # Remove bold markers
+            section_content = section_content.replace('*.', '•')  # Replace asterisk bullets
+            section_content = re.sub(r'\n{3,}', '\n\n', section_content)  # Remove extra newlines
+            
             if section_content:
                 sections[key] = section_content
     
@@ -319,7 +325,7 @@ def parse_slide_review(content: str) -> Dict[str, str]:
     return sections
 
 def display_review_sections(sections: Dict[str, str]):
-    """Display review sections with consistent formatting."""
+    """Display review sections with improved formatting."""
     section_order = [
         'response', 'analysis', 'significance', 'innovation', 
         'approach', 'scoring', 'recommendations'
@@ -347,8 +353,65 @@ def display_review_sections(sections: Dict[str, str]):
     
     for section in section_order:
         if section in sections:
+            content = sections[section]
+            
+            # Clean up the content
+            content = content.replace('**', '')  # Remove unnecessary asterisks
+            content = re.sub(r'\n{3,}', '\n\n', content)  # Remove extra newlines
+            content = content.strip()
+            
             st.markdown(f"### {icons[section]} {titles[section]}")
-            st.markdown(sections[section])
+            
+            if section == 'analysis':
+                # Special handling for section analysis to format subsections
+                for line in content.split('\n'):
+                    if ':' in line:
+                        part, desc = line.split(':', 1)
+                        if 'Content Summary' in part:
+                            st.markdown(f"**{part.strip()}:**{desc}")
+                            st.markdown("---")
+                        elif 'Critical Changes' in part:
+                            st.markdown(f"**{part.strip()}:**{desc}")
+                            st.markdown("---")
+                        elif 'Suggested Improvements' in part:
+                            st.markdown(f"**{part.strip()}:**{desc}")
+                            st.markdown("---")
+                        elif 'Specific Line Edits' in part:
+                            st.markdown(f"**{part.strip()}:**{desc}")
+                            st.markdown("---")
+                        else:
+                            st.markdown(line)
+                    else:
+                        if line.strip():
+                            st.markdown(line)
+            
+            elif section == 'scoring':
+                # Special handling for scoring section
+                for line in content.split('\n'):
+                    if '★' in line:
+                        category, score = line.split(':', 1)
+                        st.markdown(f"**{category.strip()}:** {score.strip()}")
+                    else:
+                        if line.strip():
+                            st.markdown(line)
+            
+            elif section == 'recommendations':
+                # Special handling for recommendations
+                current_section = None
+                for line in content.split('\n'):
+                    if 'Critical changes needed:' in line:
+                        current_section = "Required Changes"
+                        st.markdown(f"**{current_section}:**")
+                    elif 'Suggested improvements:' in line:
+                        current_section = "Optional Improvements"
+                        st.markdown(f"**{current_section}:**")
+                    else:
+                        if line.strip() and not line.startswith('**'):
+                            st.markdown(f"- {line.strip()}")
+            
+            else:
+                st.markdown(content)
+            
             st.markdown("---")
 
 def display_moderator_sections(content: str):
