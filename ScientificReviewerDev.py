@@ -316,92 +316,79 @@ def display_review_results(results: Dict[str, Any]):
     # Create tabs for iterations
     iteration_tabs = st.tabs([f"Iteration {i+1}" for i in range(len(results['iterations']))])
     
+    # Display reviews for each iteration
     for idx, (tab, iteration) in enumerate(zip(iteration_tabs, results['iterations'])):
         with tab:
-            st.markdown(f"### Reviews for Iteration {idx + 1}")
+            st.markdown(f"### Iteration {idx + 1} Reviews")
             
-            # Display each reviewer's response in this iteration
+            # Display each review in this iteration
             for review in iteration['reviews']:
                 with st.expander(f"Review by {review['reviewer']}", expanded=True):
-                    try:
-                        # Split content into sections for better formatting
-                        content = review['content']
-                        
-                        # Format different sections
-                        if "RESPONSE TO PREVIOUS REVIEWS" in content:
-                            st.markdown("#### 🔄 Response to Previous Reviews")
-                            section_end = content.find("\n\n2.")
-                            if section_end != -1:
-                                st.markdown(content[:section_end])
-                                content = content[section_end:]
-                        
-                        if "SIGNIFICANCE EVALUATION" in content:
-                            st.markdown("#### 📊 Significance Evaluation")
-                            section = content[content.find("SIGNIFICANCE EVALUATION"):content.find("\n\n3.")]
-                            st.markdown(section)
-                        
-                        if "INNOVATION ASSESSMENT" in content:
-                            st.markdown("#### 💡 Innovation Assessment")
-                            section = content[content.find("INNOVATION ASSESSMENT"):content.find("\n\n4.")]
-                            st.markdown(section)
-                        
-                        if "APPROACH ANALYSIS" in content:
-                            st.markdown("#### 🔍 Approach Analysis")
-                            section = content[content.find("APPROACH ANALYSIS"):content.find("\n\n5.")]
-                            st.markdown(section)
-                        
-                        if "SECTION-BY-SECTION ANALYSIS" in content:
-                            st.markdown("#### 📝 Section-by-Section Analysis")
-                            section = content[content.find("SECTION-BY-SECTION ANALYSIS"):content.find("\n\n3.")]
-                            st.markdown(section)
-                        
-                        if "SCORING" in content:
-                            st.markdown("#### ⭐ Scoring")
-                            section_start = content.find("SCORING")
-                            section_end = content.find("\n\n", section_start)
-                            if section_end != -1:
-                                st.markdown(content[section_start:section_end])
-                        
-                        if "RECOMMENDATIONS" in content:
-                            st.markdown("#### 📋 Recommendations")
-                            section_start = content.find("RECOMMENDATIONS")
-                            st.markdown(content[section_start:])
-                        
-                        st.markdown(f"*Reviewed at: {review['timestamp']}*")
-                        st.markdown("---")
+                    # Display raw content first as fallback
+                    content = review['content']
                     
-                    except Exception as e:
-                        st.error(f"Error displaying review: {str(e)}")
-                        st.markdown(content)  # Fallback to displaying raw content
+                    # Try to parse and format sections
+                    if "RESPONSE TO PREVIOUS REVIEWS" in content:
+                        st.markdown("#### Response to Previous Reviews")
+                        response_end = content.find("2. ")
+                        if response_end != -1:
+                            st.markdown(content[content.find("RESPONSE"):response_end])
+                    
+                    if "SECTION-BY-SECTION ANALYSIS" in content:
+                        st.markdown("#### Section Analysis")
+                        analysis_start = content.find("SECTION-BY-SECTION ANALYSIS")
+                        analysis_end = content.find("3. SCORING") if "3. SCORING" in content else len(content)
+                        st.markdown(content[analysis_start:analysis_end])
+                    
+                    if "SCORING" in content:
+                        st.markdown("#### Scores")
+                        scores_start = content.find("SCORING")
+                        scores_end = content.find("4. RECOMMENDATIONS") if "4. RECOMMENDATIONS" in content else len(content)
+                        st.markdown(content[scores_start:scores_end])
+                    
+                    if "RECOMMENDATIONS" in content:
+                        st.markdown("#### Recommendations")
+                        recs_start = content.find("RECOMMENDATIONS")
+                        st.markdown(content[recs_start:])
+                    
+                    # If no sections found, display entire content
+                    if not any(section in content for section in ["RESPONSE", "SECTION-BY-SECTION", "SCORING", "RECOMMENDATIONS"]):
+                        st.markdown(content)
+                    
+                    st.markdown(f"*Reviewed at: {review['timestamp']}*")
+            
+            st.markdown("---")
     
     # Display moderator summary after all iterations
-    if 'moderator_summary' in results:
-        st.markdown("## 🎯 Moderator Analysis")
-        try:
-            summary = results['moderator_summary']
-            
-            # Format moderator summary sections
-            sections = {
-                "KEY POINTS OF AGREEMENT": "🤝 Key Points of Agreement",
-                "POINTS OF CONTENTION": "⚖️ Points of Contention",
-                "DISCUSSION EVOLUTION": "📈 Discussion Evolution",
-                "FINAL SYNTHESIS": "🎯 Final Synthesis"
-            }
-            
-            for original, formatted in sections.items():
-                if original in summary:
-                    st.markdown(f"### {formatted}")
-                    section_start = summary.find(original)
-                    section_end = summary.find("\n\n", section_start)
-                    if section_end == -1:  # If it's the last section
-                        section_end = len(summary)
-                    section_content = summary[section_start:section_end].replace(original + ":", "").strip()
-                    st.markdown(section_content)
-                    st.markdown("---")
+    if 'moderator_summary' in results and results['moderator_summary']:
+        st.markdown("## Moderator Analysis")
         
-        except Exception as e:
-            st.error(f"Error displaying moderator summary: {str(e)}")
-            st.markdown(results['moderator_summary'])  # Fallback to displaying raw summary
+        moderator_content = results['moderator_summary']
+        
+        # Split and display moderator sections
+        sections = [
+            ("KEY POINTS OF AGREEMENT", "🤝 Key Points of Agreement"),
+            ("POINTS OF CONTENTION", "⚖️ Points of Contention"),
+            ("DISCUSSION EVOLUTION", "📈 Discussion Evolution"),
+            ("FINAL SYNTHESIS", "🎯 Final Synthesis")
+        ]
+        
+        for section_marker, section_title in sections:
+            if section_marker in moderator_content:
+                st.markdown(f"### {section_title}")
+                start_idx = moderator_content.find(section_marker)
+                end_idx = moderator_content.find("\n\n", start_idx)
+                if end_idx == -1:  # Last section
+                    end_idx = len(moderator_content)
+                section_text = moderator_content[start_idx:end_idx]
+                # Remove the section header from the content
+                section_text = section_text.replace(section_marker + ":", "").strip()
+                st.markdown(section_text)
+                st.markdown("---")
+        
+        # Fallback: if structured parsing fails, show raw content
+        if not any(marker in moderator_content for marker, _ in sections):
+            st.markdown(moderator_content)
 
 def main():
     st.title("Scientific Review System")
