@@ -1,4 +1,4 @@
-import streamlit as stimport streamlit as st
+import streamlit as st
 import logging
 from openai import OpenAI
 from langchain_openai import ChatOpenAI
@@ -96,7 +96,7 @@ def main():
         )
         
         num_reviewers = st.slider(
-            "Number of Reviewers","Number of Reviewers",
+            "Number of Reviewers",
             min_value=1,
             max_value=5,
             value=2
