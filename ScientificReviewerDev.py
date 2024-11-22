@@ -307,31 +307,101 @@ def extract_pdf_content(pdf_file) -> str:
 
 def display_review_results(results: Dict[str, Any]):
     """Display review results with improved formatting and moderator summary."""
+    if not results.get('iterations'):
+        st.warning("No review results to display.")
+        return
+
     st.markdown("## Review Results")
     
-    # Display iterations in tabs
-    if results['iterations']:
-        tabs = st.tabs([f"Iteration {i['iteration_number']}" for i in results['iterations']])
-        
-        for tab, iteration in zip(tabs, results['iterations']):
-            with tab:
-                for review in iteration['reviews']:
-                    with st.expander(f"Review by {review['reviewer']}", expanded=True):
-                        # Parse and display structured content
+    # Create tabs for iterations
+    iteration_tabs = st.tabs([f"Iteration {i+1}" for i in range(len(results['iterations']))])
+    
+    for idx, (tab, iteration) in enumerate(zip(iteration_tabs, results['iterations'])):
+        with tab:
+            st.markdown(f"### Reviews for Iteration {idx + 1}")
+            
+            # Display each reviewer's response in this iteration
+            for review in iteration['reviews']:
+                with st.expander(f"Review by {review['reviewer']}", expanded=True):
+                    try:
+                        # Split content into sections for better formatting
                         content = review['content']
-                        sections = content.split('\n\n')
                         
-                        for section in sections:
-                            if section.strip():
-                                st.markdown(section)
+                        # Format different sections
+                        if "RESPONSE TO PREVIOUS REVIEWS" in content:
+                            st.markdown("#### 🔄 Response to Previous Reviews")
+                            section_end = content.find("\n\n2.")
+                            if section_end != -1:
+                                st.markdown(content[:section_end])
+                                content = content[section_end:]
+                        
+                        if "SIGNIFICANCE EVALUATION" in content:
+                            st.markdown("#### 📊 Significance Evaluation")
+                            section = content[content.find("SIGNIFICANCE EVALUATION"):content.find("\n\n3.")]
+                            st.markdown(section)
+                        
+                        if "INNOVATION ASSESSMENT" in content:
+                            st.markdown("#### 💡 Innovation Assessment")
+                            section = content[content.find("INNOVATION ASSESSMENT"):content.find("\n\n4.")]
+                            st.markdown(section)
+                        
+                        if "APPROACH ANALYSIS" in content:
+                            st.markdown("#### 🔍 Approach Analysis")
+                            section = content[content.find("APPROACH ANALYSIS"):content.find("\n\n5.")]
+                            st.markdown(section)
+                        
+                        if "SECTION-BY-SECTION ANALYSIS" in content:
+                            st.markdown("#### 📝 Section-by-Section Analysis")
+                            section = content[content.find("SECTION-BY-SECTION ANALYSIS"):content.find("\n\n3.")]
+                            st.markdown(section)
+                        
+                        if "SCORING" in content:
+                            st.markdown("#### ⭐ Scoring")
+                            section_start = content.find("SCORING")
+                            section_end = content.find("\n\n", section_start)
+                            if section_end != -1:
+                                st.markdown(content[section_start:section_end])
+                        
+                        if "RECOMMENDATIONS" in content:
+                            st.markdown("#### 📋 Recommendations")
+                            section_start = content.find("RECOMMENDATIONS")
+                            st.markdown(content[section_start:])
                         
                         st.markdown(f"*Reviewed at: {review['timestamp']}*")
                         st.markdown("---")
+                    
+                    except Exception as e:
+                        st.error(f"Error displaying review: {str(e)}")
+                        st.markdown(content)  # Fallback to displaying raw content
     
-    # Display moderator summary
+    # Display moderator summary after all iterations
     if 'moderator_summary' in results:
-        with st.expander("🎯 Moderator Analysis", expanded=True):
-            st.markdown(results['moderator_summary'])
+        st.markdown("## 🎯 Moderator Analysis")
+        try:
+            summary = results['moderator_summary']
+            
+            # Format moderator summary sections
+            sections = {
+                "KEY POINTS OF AGREEMENT": "🤝 Key Points of Agreement",
+                "POINTS OF CONTENTION": "⚖️ Points of Contention",
+                "DISCUSSION EVOLUTION": "📈 Discussion Evolution",
+                "FINAL SYNTHESIS": "🎯 Final Synthesis"
+            }
+            
+            for original, formatted in sections.items():
+                if original in summary:
+                    st.markdown(f"### {formatted}")
+                    section_start = summary.find(original)
+                    section_end = summary.find("\n\n", section_start)
+                    if section_end == -1:  # If it's the last section
+                        section_end = len(summary)
+                    section_content = summary[section_start:section_end].replace(original + ":", "").strip()
+                    st.markdown(section_content)
+                    st.markdown("---")
+        
+        except Exception as e:
+            st.error(f"Error displaying moderator summary: {str(e)}")
+            st.markdown(results['moderator_summary'])  # Fallback to displaying raw summary
 
 def main():
     st.title("Scientific Review System")
