@@ -413,7 +413,7 @@ def display_review_results(results: Dict[str, Any]):
         display_moderator_sections(results['moderator_summary'])
 
 class ModeratorAgent:
-    def __init__(self, model="gpt-4"):
+    def __init__(self, model="gpt-4o"):
         self.model = ChatOpenAI(
             temperature=0.0,  # Keep moderator objective
             openai_api_key=st.secrets["openai_api_key"],
@@ -497,7 +497,7 @@ class ReviewManager:
                 for reviewer in config['reviewers']:
                     try:
                         temperature = self._calculate_temperature(config.get('bias', 0))
-                        model = self.model_config.get(config['doc_type'], "gpt-4")
+                        model = self.model_config.get(config['doc_type'], "o")
                         
                         if is_presentation:
                             presentation_reviewer = PresentationReviewer(model=model)
@@ -802,7 +802,7 @@ Please provide a comprehensive review using this structure:
 class PresentationReviewer:
     """Specialized reviewer for PowerPoint presentations."""
     
-    def __init__(self, model="gpt-4"):
+    def __init__(self, model="gpt-4o"):
         self.model = model
     
     def review_presentation(self, sections: List[Dict[str, Any]], expertise: str) -> Dict[str, Any]:
@@ -1091,7 +1091,7 @@ def main():
             expertise_category = st.selectbox(
                 "Expertise Category",
                 list(EXPERTISE_OPTIONS.keys()),
-                key=f"cat_{i}"
+                key=f"cat_{i}"import json
             )
         
         with col2:
