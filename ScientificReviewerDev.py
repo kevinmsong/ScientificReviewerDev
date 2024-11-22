@@ -102,7 +102,7 @@ EXPERTISE_OPTIONS = {
     ]
 }
 
-# Review settings can remain the same
+# Review settings
 REVIEW_DEFAULTS = {
     "Paper": {
         "reviewers": 4,
@@ -119,9 +119,9 @@ REVIEW_DEFAULTS = {
 }
 
 class ModeratorAgent:
-    def __init__(self, model="gpt-4o"):
+    def __init__(self, model="o"):
         self.model = ChatOpenAI(
-            temperature=0.1,
+            temperature=0.0,  # Keep moderator objective
             openai_api_key=st.secrets["openai_api_key"],
             model=model
         )
@@ -132,7 +132,8 @@ class ModeratorAgent:
         for iteration in iterations:
             discussion_summary += f"Iteration {iteration['iteration_number']} reviews:\n"
             for review in iteration['reviews']:
-                discussion_summary += f"- {review['reviewer']}: {review['content']}\n\n"
+                if not review.get('error', False):  # Only include successful reviews
+                    discussion_summary += f"- {review['reviewer']}: {review['content']}\n\n"
         
         moderator_prompt = f"""As a moderator, analyze how the scientific discussion evolved across these iterations:
 
@@ -169,7 +170,12 @@ class ReviewManager:
     def __init__(self):
         self.model = "gpt-4o"
         self.moderator = ModeratorAgent()
-        
+    
+    def _calculate_temperature(self, bias: int) -> float:
+        """Calculate temperature based on reviewer bias while keeping it within valid range."""
+        # Base temperature of 0.7, adjusted by bias but kept within [0.0, 1.0]
+        return max(0.0, min(1.0, 0.7 + (bias * 0.1)))
+    
     def process_review(self, content: str, config: Dict[str, Any]) -> Dict[str, Any]:
         """Process document review with multiple iterations and moderation."""
         iterations = []
@@ -177,9 +183,6 @@ class ReviewManager:
         
         try:
             for iteration in range(config['iterations']):
-                # Debug logging
-                st.write(f"Debug - Processing iteration {iteration + 1}")
-                
                 iteration_reviews = []
                 
                 # Create context from previous reviews
@@ -187,14 +190,17 @@ class ReviewManager:
                 if all_reviews:
                     previous_context = "\n\nPrevious reviews:\n" + \
                         "\n".join([f"Reviewer {r['reviewer']}: {r['content']}" 
-                                 for r in all_reviews])
+                                 for r in all_reviews if not r.get('error', False)])
                 
                 for reviewer in config['reviewers']:
                     try:
+                        # Calculate valid temperature based on bias
+                        temperature = self._calculate_temperature(config.get('bias', 0))
+                        
                         agent = ChatOpenAI(
-                            temperature=0.1 + config.get('bias', 0) * 0.1,
+                            temperature=temperature,
                             openai_api_key=st.secrets["openai_api_key"],
-                            model="gpt-4"
+                            model=self.model
                         )
                         
                         prompt = self._create_review_prompt(
@@ -213,14 +219,17 @@ class ReviewManager:
                             'timestamp': datetime.now().isoformat()
                         }
                         
-                        # Debug logging
-                        st.write(f"Debug - Got review from {reviewer['expertise']}")
-                        
                         iteration_reviews.append(review)
                         all_reviews.append(review)
                         
                     except Exception as e:
                         st.error(f"Error in review by {reviewer['expertise']}: {str(e)}")
+                        iteration_reviews.append({
+                            'reviewer': reviewer['expertise'],
+                            'content': f"Review failed: {str(e)}",
+                            'timestamp': datetime.now().isoformat(),
+                            'error': True
+                        })
                 
                 iterations.append({
                     'iteration_number': iteration + 1,
@@ -228,10 +237,9 @@ class ReviewManager:
                 })
             
             # Generate moderator summary
-            moderator = ModeratorAgent()
-            moderator_summary = moderator.summarize_discussion(iterations)
+            moderator_summary = self.moderator.summarize_discussion(iterations)
             
-            results = {
+            return {
                 'iterations': iterations,
                 'moderator_summary': moderator_summary,
                 'config': config,
@@ -239,17 +247,10 @@ class ReviewManager:
                 'doc_type': config['doc_type']
             }
             
-            # Debug logging
-            st.write("Debug - Final results structure:", 
-                    {k: type(v) for k, v in results.items()})
-            
-            return results
-            
         except Exception as e:
             st.error(f"Error in review process: {str(e)}")
-            st.exception(e)
             raise
-    
+
     def _create_review_prompt(self, doc_type: str, expertise: str, scoring_type: str, 
                             iteration: int, previous_context: str) -> str:
         """Create review prompt with context from previous iterations."""
@@ -318,189 +319,3 @@ def extract_pdf_content(pdf_file) -> str:
     try:
         pdf_document = fitz.open(stream=pdf_file.read(), filetype="pdf")
         text_content = ""
-        
-        for page in pdf_document:
-            text_content += page.get_text()
-            
-        return text_content.strip()
-    except Exception as e:
-        raise Exception(f"Error processing PDF: {str(e)}")
-
-def display_review_results(results: Dict[str, Any]):
-    """Display review results with improved formatting and moderator summary."""
-    st.markdown("## Review Results")
-    
-    # Debug logging
-    st.write("Debug - Results structure:", results.keys())
-    
-    if not results.get('iterations'):
-        st.warning("No review results available.")
-        return
-    
-    # Show iteration tabs
-    tab_names = [f"Iteration {i+1}" for i in range(len(results['iterations']))]
-    tabs = st.tabs(tab_names)
-    
-    # Display reviews for each iteration
-    for idx, (tab, iteration) in enumerate(zip(tabs, results['iterations'])):
-        with tab:
-            st.markdown(f"### Iteration {idx + 1} Reviews")
-            
-            # Debug logging
-            st.write(f"Debug - Number of reviews in iteration {idx + 1}:", 
-                    len(iteration['reviews']))
-            
-            # Display each review in current iteration
-            for review in iteration['reviews']:
-                st.write("Debug - Review keys:", review.keys())
-                
-                with st.expander(f"Review by {review['reviewer']}", expanded=True):
-                    st.markdown("#### Raw Review Content")
-                    st.markdown(review.get('content', 'No content available'))
-                    st.markdown(f"*Timestamp: {review.get('timestamp', 'No timestamp')}*")
-            
-            st.markdown("---")
-    
-    # Display moderator analysis if available
-    if 'moderator_summary' in results and results['moderator_summary']:
-        st.markdown("## Moderator Analysis")
-        mod_summary = results['moderator_summary']
-        
-        # Show moderator content sections
-        for section in ['KEY POINTS OF AGREEMENT', 'POINTS OF CONTENTION', 
-                       'DISCUSSION EVOLUTION', 'FINAL SYNTHESIS']:
-            if section in mod_summary:
-                st.markdown(f"### {section.title()}")
-                start = mod_summary.find(section) + len(section)
-                end = mod_summary.find('\n\n', start)
-                if end == -1:
-                    end = len(mod_summary)
-                content = mod_summary[start:end].strip(':').strip()
-                st.markdown(content)
-                st.markdown("---")
-
-def main():
-    st.title("Scientific Review System")
-    
-    # Main configuration area
-    st.markdown("## Document Configuration")
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        doc_type = st.selectbox(
-            "Document Type",
-            list(REVIEW_DEFAULTS.keys())
-        )
-        
-        venue = st.text_input(
-            "Dissemination Venue",
-            placeholder="e.g., Nature, NIH R01, Conference Name"
-        )
-    
-    with col2:
-        scoring_system = st.radio(
-            "Scoring System",
-            ["stars", "nih"],
-            format_func=lambda x: "Star Rating (1-5)" if x == "stars" else "NIH Scale (1-9)"
-        )
-    
-    # Reviewer configuration
-    st.markdown("## Reviewer Configuration")
-    default_settings = REVIEW_DEFAULTS[doc_type]
-    
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        num_reviewers = st.number_input(
-            "Number of Reviewers",
-            min_value=1,
-            max_value=10,
-            value=default_settings['reviewers']
-        )
-    
-    with col2:
-        num_iterations = st.number_input(
-            "Number of Iterations",
-            min_value=1,
-            max_value=10,
-            value=default_settings['iterations']
-        )
-    
-    with col3:
-        reviewer_bias = st.select_slider(
-            "Reviewer Bias",
-            options=[-2, -1, 0, 1, 2],
-            value=0,
-            format_func=lambda x: {
-                -2: "Extremely Negative",
-                -1: "Somewhat Negative",
-                0: "Unbiased",
-                1: "Somewhat Positive",
-                2: "Extremely Positive"
-            }[x]
-        )
-    
-    # Reviewer expertise selection
-    reviewers = []
-    for i in range(num_reviewers):
-        st.markdown(f"### Reviewer {i+1}")
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            expertise_category = st.selectbox(
-                "Expertise Category",
-                list(EXPERTISE_OPTIONS.keys()),
-                key=f"cat_{i}"
-            )
-        
-        with col2:
-            expertise = st.selectbox(
-                "Specific Expertise",
-                EXPERTISE_OPTIONS[expertise_category],
-                key=f"exp_{i}"
-            )
-        
-        reviewers.append({"expertise": expertise})
-    
-    # Document upload
-    st.markdown("## Document Upload")
-    uploaded_file = st.file_uploader("Upload Document (PDF)", type=["pdf"])
-    
-    if uploaded_file:
-        try:
-            # Extract content
-            with st.spinner("Extracting document content..."):
-                content = extract_pdf_content(uploaded_file)
-            
-            # Process review
-            if st.button("Generate Review", type="primary"):
-                config = {
-                    "doc_type": doc_type,
-                    "venue": venue,
-                    "scoring": scoring_system,
-                    "reviewers": reviewers,
-                    "iterations": num_iterations,
-                    "bias": reviewer_bias
-                }
-                
-                with st.spinner("Generating reviews..."):
-                    review_manager = ReviewManager()
-                    results = review_manager.process_review(
-                        content=content,
-                        config=config
-                    )
-                    
-                    display_review_results(results)
-                    
-                    # Download button for results
-                    st.download_button(
-                        label="Download Review Report",
-                        data=json.dumps(results, indent=2),
-                        file_name=f"review_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-                        mime="application/json"
-                    )
-                    
-        except Exception as e:
-            st.error(f"Error: {str(e)}")
-
-if __name__ == "__main__":
-    main()
