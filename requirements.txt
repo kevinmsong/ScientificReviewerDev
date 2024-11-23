@@ -8,3 +8,4 @@ PyMuPDF>=1.23.8
 python-pptx>=0.6.21
 python-dotenv>=1.0.0
 typing-extensions>=4.5.0
+unstructured
