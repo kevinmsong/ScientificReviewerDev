@@ -739,36 +739,42 @@ Communication Effectiveness: (1-5 stars)"""
             }
 
     def review_presentation(self, sections: List[Dict[str, Any]], expertise: str, temperature: float = 0.7) -> Dict[str, Any]:
-        """Review a presentation slide by slide with relaxed validation."""
+        """Review a presentation slide by slide."""
         try:
             if not sections:
                 raise ValueError("No sections provided for review")
 
+            # Initialize OpenAI client
             self.client = ChatOpenAI(
                 temperature=temperature,
                 openai_api_key=st.secrets["openai_api_key"],
                 model=self.model
             )
 
+            # Filter and sort slides
+            slide_sections = [s for s in sections if s.get('type') == 'slide']
+            print(f"Found {len(slide_sections)} slides to review")  # Debug print
+
             slide_reviews = []
             overall_structure = []
-            slide_sections = [s for s in sections if s.get('type') == 'slide']
 
-            # Review each slide
+            # Process each slide with explicit numbering
             for slide_num, section in enumerate(slide_sections, 1):
+                print(f"Processing slide {slide_num}")  # Debug print
                 try:
                     if not section.get('content'):
                         logging.warning(f"Skipping slide {slide_num} - no content")
                         continue
 
+                    # Ensure the slide has a number
                     section['number'] = slide_num
                     review = self._review_slide(section, expertise)
                     
-                    # Accept review if it has content, regardless of other components
                     if review.get('content') and not review.get('error'):
                         formatted_content = self._format_review_text(review['content'])
                         review['content'] = formatted_content
-                        review['slide_number'] = slide_num
+                        review['slide_number'] = slide_num  # Ensure slide number is set
+                        print(f"Successfully reviewed slide {slide_num}")  # Debug print
                         slide_reviews.append(review)
                         
                         overall_structure.append({
@@ -777,51 +783,59 @@ Communication Effectiveness: (1-5 stars)"""
                             'key_points': review.get('key_points', [])
                         })
                     else:
-                        logging.error(f"Error in slide {slide_num}: {review.get('error', 'Unknown error')}")
+                        error_msg = f"Error in slide {slide_num}: {review.get('error', 'Unknown error')}"
+                        logging.error(error_msg)
+                        print(error_msg)  # Debug print
 
                 except Exception as e:
-                    logging.error(f"Error processing slide {slide_num}: {str(e)}")
-                    slide_reviews.append({
-                        'slide_number': slide_num,
-                        'error': True,
-                        'content': f"Review failed for slide {slide_num}: {str(e)}"
-                    })
+                    error_msg = f"Error processing slide {slide_num}: {str(e)}"
+                    logging.error(error_msg)
+                    print(error_msg)  # Debug print
+
+            # Verify we processed all slides
+            print(f"Processed {len(slide_reviews)} slide reviews")  # Debug print
 
             if not slide_reviews:
                 raise ValueError("No valid slides were processed")
 
+            # Sort reviews by slide number to ensure correct order
+            slide_reviews.sort(key=lambda x: x.get('slide_number', float('inf')))
+
             # Generate overall review
             overall_review = self._generate_overall_review(slide_reviews, overall_structure, expertise)
-            
-            # Accept overall review if it has content
-            if not overall_review.get('content'):
+            if overall_review and overall_review.get('content'):
+                overall_review['content'] = self._format_review_text(overall_review['content'])
+            else:
                 overall_review = {
                     'content': "Failed to generate overall review",
                     'scores': {},
                     'recommendations': {'required': [], 'optional': []}
                 }
-            else:
-                overall_review['content'] = self._format_review_text(overall_review['content'])
 
-            # Sort slide reviews by number
-            slide_reviews.sort(key=lambda x: x.get('slide_number', float('inf')))
-
-            return {
+            result = {
                 'slide_reviews': slide_reviews,
                 'overall_review': overall_review,
                 'structure_analysis': overall_structure
             }
 
-        except Exception as e:
-            error_msg = f"Presentation review failed: {str(e)}"
-            logging.error(error_msg)
-            return {
-                'error': True,
-                'message': error_msg,
-                'slide_reviews': [],
-                'overall_review': {'content': error_msg},
-                'structure_analysis': []
-            }
+            # Debug print final structure
+            print(f"Final result has {len(result['slide_reviews'])} slide reviews")
+            for review in result['slide_reviews']:
+                print(f"Review for slide {review.get('slide_number')}")
+
+            return result
+
+    except Exception as e:
+        error_msg = f"Presentation review failed: {str(e)}"
+        logging.error(error_msg)
+        print(error_msg)  # Debug print
+        return {
+            'error': True,
+            'message': error_msg,
+            'slide_reviews': [],
+            'overall_review': {'content': error_msg},
+            'structure_analysis': []
+        }
 
     def _extract_scores(self, content: str) -> Dict[str, int]:
         """Extract numerical scores from review content."""
