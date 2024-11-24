@@ -825,17 +825,17 @@ Communication Effectiveness: (1-5 stars)"""
 
             return result
 
-    except Exception as e:
-        error_msg = f"Presentation review failed: {str(e)}"
-        logging.error(error_msg)
-        print(error_msg)  # Debug print
-        return {
-            'error': True,
-            'message': error_msg,
-            'slide_reviews': [],
-            'overall_review': {'content': error_msg},
-            'structure_analysis': []
-        }
+        except Exception as e:
+            error_msg = f"Presentation review failed: {str(e)}"
+            logging.error(error_msg)
+            print(error_msg)  # Debug print
+            return {
+                'error': True,
+                'message': error_msg,
+                'slide_reviews': [],
+                'overall_review': {'content': error_msg},
+                'structure_analysis': []
+            }
 
     def _extract_scores(self, content: str) -> Dict[str, int]:
         """Extract numerical scores from review content."""
