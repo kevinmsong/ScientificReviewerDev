@@ -510,9 +510,9 @@ def display_review_results(results: Dict[str, Any]):
         display_moderator_sections(results['moderator_summary'])
 
 class ModeratorAgent:
-    def __init__(self, model="gpt-4o"):
+    def __init__(self, model="gpt-4o"):  # Update default model
         self.model = ChatOpenAI(
-            temperature=0.0,  # Keep moderator objective
+            temperature=0.0,
             openai_api_key=st.secrets["openai_api_key"],
             model=model
         )
@@ -564,17 +564,14 @@ Format your response using these exact sections and maintain a balanced, objecti
 
 class ReviewManager:
     def __init__(self):
+        # Update model configuration to use gpt-4o
         self.model_config = {
             "Paper": "gpt-4o",
             "Grant": "gpt-4o",
-            "Poster": "gpt-4-turbo-preview"  # Use GPT-4-turbo for posters
+            "Poster": "gpt-4o",
+            "Presentation": "gpt-4o"  # Ensure consistent model name for presentations
         }
         self.moderator = ModeratorAgent()
-    
-    def _calculate_temperature(self, bias: int) -> float:
-        """Calculate temperature based on reviewer bias while keeping it within valid range."""
-        # Base temperature of 0.7, adjusted by bias but kept within [0.0, 1.0]
-        return max(0.0, min(1.0, 0.7 + (bias * 0.1)))
     
     def process_review(self, content: str, sections: List[Dict[str, Any]], config: Dict[str, Any]) -> Dict[str, Any]:
         """Process document review with multiple iterations and moderation."""
@@ -585,7 +582,7 @@ class ReviewManager:
             # Check if it's a PowerPoint file
             is_presentation = any(section.get('type') == 'slide' for section in sections)
             if is_presentation:
-                config['doc_type'] = "Presentation"  # Override doc_type for presentations
+                config['doc_type'] = "Presentation"
             
             for iteration in range(config['iterations']):
                 iteration_reviews = []
@@ -594,10 +591,11 @@ class ReviewManager:
                 for reviewer in config['reviewers']:
                     try:
                         temperature = self._calculate_temperature(config.get('bias', 0))
-                        model = self.model_config.get(config['doc_type'], "o")
+                        # Get correct model name with fallback
+                        model = self.model_config.get(config['doc_type'], "gpt-4o")
                         
                         if is_presentation:
-                            presentation_reviewer = PresentationReviewer(model=model)
+                            presentation_reviewer = PresentationReviewer(model=model)  # Pass correct model name
                             review_results = presentation_reviewer.review_presentation(
                                 sections=sections,
                                 expertise=reviewer['expertise']
@@ -630,7 +628,7 @@ class ReviewManager:
                         all_reviews.append(review)
                         
                     except Exception as e:
-                        st.error(f"Error in review by {reviewer['expertise']}: {str(e)}")
+                        logging.error(f"Error in review by {reviewer['expertise']}: {str(e)}")
                         iteration_reviews.append({
                             'reviewer': reviewer['expertise'],
                             'content': f"Review failed: {str(e)}",
@@ -655,101 +653,8 @@ class ReviewManager:
             }
             
         except Exception as e:
-            st.error(f"Error in review process: {str(e)}")
+            logging.error(f"Error in review process: {str(e)}")
             raise
-    
-    def _create_previous_context(self, reviews: List[Dict[str, Any]]) -> str:
-        """Create context from previous reviews."""
-        if not reviews:
-            return ""
-            
-        context = "\nPrevious reviews:\n"
-        for review in reviews:
-            if not review.get('error', False):
-                context += f"\n{review['reviewer']}:\n{review['content']}\n"
-        return context
-
-    def _process_sectioned_content(self, agent, sections: List[Dict[str, Any]], 
-                                 reviewer: Dict[str, str], config: Dict[str, Any],
-                                 iteration: int, previous_context: str) -> Dict[str, Any]:
-        """Process content section by section (for posters and slides)."""
-        try:
-            if sections[0].get('type') == 'slide':
-                # Use specialized presentation reviewer
-                presentation_reviewer = PresentationReviewer(model=self.model_config[config['doc_type']])
-                review_results = presentation_reviewer.review_presentation(
-                    sections=sections,
-                    expertise=reviewer['expertise']
-                )
-                
-                return {
-                    'reviewer': reviewer['expertise'],
-                    'content': review_results['overall_review']['content'],
-                    'slide_reviews': review_results['slide_reviews'],
-                    'structure_analysis': review_results['structure_analysis'],
-                    'timestamp': datetime.now().isoformat()
-                }
-            else:
-                # Original section review logic for posters
-                section_reviews = []
-                for section in sections:
-                    prompt = self._create_section_review_prompt(
-                        doc_type=config['doc_type'],
-                        expertise=reviewer['expertise'],
-                        scoring_type=config['scoring'],
-                        iteration=iteration,
-                        previous_context=previous_context,
-                        section_type=section['type'],
-                        section_number=section.get('number', 1)
-                    )
-                    
-                    response = agent.invoke([
-                        HumanMessage(content=f"{prompt}\n\nContent:\n{section['content']}")
-                    ])
-                    section_reviews.append({
-                        'section_number': section.get('number', 1),
-                        'content': response.content
-                    })
-                
-                # Compile section reviews into final review
-                compilation_prompt = self._create_compilation_prompt(
-                    doc_type=config['doc_type'],
-                    expertise=reviewer['expertise'],
-                    section_reviews=section_reviews
-                )
-                
-                final_response = agent.invoke([HumanMessage(content=compilation_prompt)])
-                
-                return {
-                    'reviewer': reviewer['expertise'],
-                    'content': final_response.content,
-                    'section_reviews': section_reviews,
-                    'timestamp': datetime.now().isoformat()
-                }
-                
-        except Exception as e:
-            logging.error(f"Error in sectioned content review: {e}")
-            raise
-    
-    def _process_full_content(self, agent, content: str, reviewer: Dict[str, str],
-                            config: Dict[str, Any], iteration: int,
-                            previous_context: str) -> Dict[str, Any]:
-        """Process full content for papers and grants."""
-        prompt = self._create_review_prompt(
-            doc_type=config['doc_type'],
-            expertise=reviewer['expertise'],
-            scoring_type=config['scoring'],
-            iteration=iteration,
-            previous_context=previous_context
-        )
-        
-        response = agent.invoke([HumanMessage(content=f"{prompt}\n\nContent:\n{content}")])
-        
-        return {
-            'reviewer': reviewer['expertise'],
-            'content': response.content,
-            'timestamp': datetime.now().isoformat()
-        }
 
 class ReviewManager(ReviewManager):  # Continuing the ReviewManager class
     def _create_review_prompt(self, doc_type: str, expertise: str, scoring_type: str, 
@@ -899,7 +804,7 @@ Please provide a comprehensive review using this structure:
 class PresentationReviewer:
     """Specialized reviewer for PowerPoint presentations with improved error handling."""
     
-    def __init__(self, model="gpt-4-turbo-preview"):
+    def __init__(self, model="gpt-4o"):  # Update default model
         self.model = model
         self.client = ChatOpenAI(
             temperature=0.1,
