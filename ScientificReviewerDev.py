@@ -668,12 +668,175 @@ class PresentationReviewer:
     def __init__(self, model="gpt-4o"):
         self.model = model
     
+    def _review_slide(self, slide: Dict[str, Any], expertise: str) -> Dict[str, Any]:
+        """Review an individual slide with comprehensive analysis."""
+        try:
+            if not slide.get('content'):
+                raise ValueError("Empty slide content")
+
+            prompt = f"""As a {expertise}, review this presentation slide:
+
+Slide {slide.get('number', 1)} Content:
+{slide['content']}
+
+Provide a structured analysis using these exact sections:
+
+SLIDE PURPOSE:
+- Main message and objective
+- Target audience relevance
+- Position in presentation flow
+
+CONTENT ANALYSIS:
+- Key points and main ideas
+- Technical accuracy
+- Supporting evidence
+- Data presentation (if applicable)
+
+VISUAL DESIGN:
+- Layout effectiveness
+- Visual hierarchy
+- Space utilization
+- Graphics and images effectiveness
+
+COMMUNICATION:
+- Clarity of message
+- Text conciseness
+- Audience engagement
+- Technical language appropriateness
+
+RECOMMENDATIONS:
+[REQUIRED] Critical improvements needed:
+- List specific required changes
+
+[OPTIONAL] Enhancement suggestions:
+- List potential improvements
+
+SCORING:
+Rate each aspect (using ★):
+Content Quality: (1-5 stars)
+Visual Design: (1-5 stars)
+Communication Effectiveness: (1-5 stars)"""
+
+            # Initialize AI client for this review
+            client = ChatOpenAI(
+                temperature=0.7,
+                openai_api_key=st.secrets["openai_api_key"],
+                model=self.model
+            )
+            
+            response = client.invoke([HumanMessage(content=prompt)])
+            
+            if not response or not hasattr(response, 'content'):
+                raise ValueError("Invalid AI response")
+
+            content = response.content
+            
+            # Extract structured information
+            review = {
+                'slide_number': slide.get('number', 1),
+                'content': content,
+                'scores': self._extract_scores(content),
+                'key_points': self._extract_key_points(content),
+                'recommendations': self._extract_recommendations(content)
+            }
+
+            return review
+
+        except Exception as e:
+            error_msg = f"Slide review failed: {str(e)}"
+            logging.error(error_msg)
+            return {
+                'slide_number': slide.get('number', 1),
+                'error': error_msg,
+                'content': f"Review failed for slide {slide.get('number', 1)}: {str(e)}"
+            }
+
+    def _generate_overall_review(self, slide_reviews: List[Dict[str, Any]], 
+                               structure: List[Dict[str, Any]], expertise: str) -> Dict[str, Any]:
+        """Generate overall presentation review."""
+        try:
+            if not slide_reviews:
+                raise ValueError("No slide reviews to analyze")
+
+            # Create a summary of the presentation structure
+            structure_summary = "\n".join([
+                f"Slide {s['slide_number']}: {s['content_type'].title()}"
+                for s in structure
+            ])
+
+            prompt = f"""As a {expertise}, synthesize this complete presentation review:
+
+Presentation Structure:
+{structure_summary}
+
+Individual Slide Reviews Summary:
+{json.dumps([{
+    'slide_number': r['slide_number'],
+    'key_points': r.get('key_points', []),
+    'scores': r.get('scores', {})
+} for r in slide_reviews if not r.get('error')], indent=2)}
+
+Provide a comprehensive review using these exact sections:
+
+OVERALL ASSESSMENT:
+- Main objectives and target audience
+- Presentation flow and structure
+- Technical depth and clarity
+
+KEY STRENGTHS:
+- List major effective elements
+- Highlight successful aspects
+
+CRITICAL IMPROVEMENTS:
+- List essential changes needed
+- Identify major issues
+
+RECOMMENDATIONS:
+[REQUIRED] Essential improvements:
+- List critical changes needed
+
+[OPTIONAL] Enhancements:
+- List suggested improvements
+
+OVERALL SCORES (using ★):
+Content Organization: (1-5 stars)
+Visual Design: (1-5 stars)
+Technical Quality: (1-5 stars)
+Presentation Impact: (1-5 stars)"""
+
+            # Initialize AI client for overall review
+            client = ChatOpenAI(
+                temperature=0.7,
+                openai_api_key=st.secrets["openai_api_key"],
+                model=self.model
+            )
+            
+            response = client.invoke([HumanMessage(content=prompt)])
+            
+            if not response or not hasattr(response, 'content'):
+                raise ValueError("Invalid AI response for overall review")
+
+            return {
+                'content': response.content,
+                'scores': self._extract_scores(response.content),
+                'recommendations': self._extract_recommendations(response.content)
+            }
+
+        except Exception as e:
+            error_msg = f"Overall review generation failed: {str(e)}"
+            logging.error(error_msg)
+            return {
+                'content': error_msg,
+                'scores': {},
+                'recommendations': {'required': [], 'optional': []}
+            }
+
     def review_presentation(self, sections: List[Dict[str, Any]], expertise: str, temperature: float = 0.7) -> Dict[str, Any]:
         """Review a presentation slide by slide with bias-based temperature."""
         try:
             if not sections:
                 raise ValueError("No sections provided for review")
-
+            
             # Initialize OpenAI client with provided temperature
             self.client = ChatOpenAI(
                 temperature=temperature,
