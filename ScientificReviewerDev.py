@@ -577,6 +577,30 @@ class ReviewManager:
             "Presentation": "gpt-4o"
         }
         self.moderator = ModeratorAgent()
+
+    def _create_previous_context(self, reviews: List[Dict[str, Any]]) -> str:
+        """Create context from previous reviews."""
+        if not reviews:
+            return ""
+            
+        context = "\nPrevious reviews:\n"
+        for review in reviews:
+            if not review.get('error', False):
+                if review.get('is_presentation', False):
+                    # Handle presentation reviews
+                    context += f"\n{review['reviewer']} Overall Assessment:\n{review['content']}\n"
+                    
+                    # Add key points from slide reviews
+                    context += "\nKey points from slides:\n"
+                    for slide_review in review.get('slide_reviews', []):
+                        if not slide_review.get('error'):
+                            context += f"Slide {slide_review['slide_number']}: "
+                            context += f"{'; '.join(slide_review.get('key_points', []))}\n"
+                else:
+                    # Handle regular document reviews
+                    context += f"\n{review['reviewer']}:\n{review['content']}\n"
+        
+        return context
     
     def _calculate_temperature(self, bias: int) -> float:
         """Calculate temperature based on reviewer bias."""
