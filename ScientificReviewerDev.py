@@ -739,13 +739,13 @@ Communication Effectiveness: (1-5 stars)"""
             }
 
     def _extract_scores(self, content: str) -> Dict[str, int]:
-        """Extract scores with more lenient parsing."""
+        """Extract numerical scores from review content."""
         scores = {}
         try:
             patterns = [
-                r'([^:\n]+?):\s*(★+(?:☆)*)',  # Star ratings
-                r'([^:\n]+?):\s*(\d+)(?:\s*stars?)?(?=[\s\n]|$)',  # Numeric ratings
-                r'([^:\n]+?):\s*(\d+)/5'  # X/5 format
+                r'([^:\n]+?):\s*(★+(?:☆)*)',
+                r'([^:\n]+?):\s*(\d+)(?:\s*stars?)?(?=[\s\n]|$)',
+                r'([^:\n]+?):\s*(\d+)/5'
             ]
             
             for pattern in patterns:
@@ -763,7 +763,7 @@ Communication Effectiveness: (1-5 stars)"""
                             continue
                     
                     score = max(1, min(5, score))
-                    if category and score:  # Only add if both exist
+                    if category and score:
                         scores[category] = score
             
             return scores
@@ -772,19 +772,34 @@ Communication Effectiveness: (1-5 stars)"""
             return {}
 
     def _extract_key_points(self, content: str) -> List[str]:
-        """Extract key points with more lenient parsing."""
+        """Extract key points from review content."""
         key_points = []
         try:
-            # Look for bullet points or numbered items anywhere in the content
-            points = re.findall(r'(?:^|\n)\s*(?:[-•*]|\d+\.)\s*(.*?)(?=\n|$)', content)
-            key_points = [p.strip() for p in points if len(p.strip()) > 5]  # Filter very short points
+            sections = [
+                'CONTENT ANALYSIS',
+                'KEY POINTS',
+                'MAIN POINTS',
+                'SLIDE PURPOSE'
+            ]
+            
+            for section in sections:
+                pattern = fr'{section}:?(.*?)(?=\n\n[A-Z\s]+:|$)'
+                matches = re.search(pattern, content, re.DOTALL | re.IGNORECASE)
+                if matches:
+                    section_text = matches.group(1).strip()
+                    points = re.findall(r'(?:^|\n)\s*[-•*]\s*(.*?)(?=\n|$)', section_text)
+                    if not points:
+                        points = re.findall(r'(?:^|\n)\s*\d+\.\s*(.*?)(?=\n|$)', section_text)
+                    
+                    points = [p.strip() for p in points if p.strip()]
+                    if points:
+                        key_points.extend(points)
+                        break
             
             if not key_points:
-                # Fallback: extract sentences from content analysis section
-                if 'CONTENT ANALYSIS' in content:
-                    analysis = content.split('CONTENT ANALYSIS')[1].split('\n\n')[0]
-                    sentences = re.split(r'[.!?]+\s+', analysis)
-                    key_points = [s.strip() for s in sentences if len(s.strip()) > 20][:5]
+                # Fallback to extracting sentences
+                sentences = re.split(r'[.!?]+\s+', content)
+                key_points = [s.strip() for s in sentences if len(s.strip()) > 20][:3]
             
             return key_points[:5]  # Limit to top 5 points
             
@@ -833,17 +848,19 @@ Communication Effectiveness: (1-5 stars)"""
     def _format_review_text(self, raw_content: str) -> str:
         """Format and clean review text for better presentation."""
         try:
+            # Remove excessive newlines
             content = re.sub(r'\n{3,}', '\n\n', raw_content)
+            
+            # Format section headers
             content = re.sub(r'(?m)^([A-Z][A-Z\s]+):', r'\n\1:', content)
+            
+            # Clean up bullet points
             content = re.sub(r'(?m)^\s*[*•]\s*', '• ', content)
+            
+            # Format star ratings
             content = re.sub(r'(\d)\s*stars?\b', r'\1★', content)
             content = re.sub(r'(\d)/5', r'\1★', content)
-            
-            def replace_rating(match):
-                num = int(match.group(1))
-                return '★' * num + '☆' * (5 - num)
-            
-            content = re.sub(r'(\d)★', replace_rating, content)
+            content = content.replace('*', '★')
             
             return content.strip()
             
@@ -871,139 +888,6 @@ Communication Effectiveness: (1-5 stars)"""
             if any(keyword in content_lower for keyword in keywords):
                 return slide_type
         return 'content'
-
-    def _generate_overall_review(self, slide_reviews: List[Dict[str, Any]], 
-                               structure: List[Dict[str, Any]], expertise: str) -> Dict[str, Any]:
-        """Generate overall presentation review."""
-        try:
-            if not slide_reviews:
-                raise ValueError("No slide reviews to analyze")
-
-            structure_summary = "\n".join([
-                f"Slide {s['slide_number']}: {s['content_type'].title()}"
-                for s in structure
-            ])
-
-            prompt = f"""As a {expertise}, synthesize this complete presentation review:
-
-Presentation Structure:
-{structure_summary}
-
-Individual Slide Reviews Summary:
-{json.dumps([{
-    'slide_number': r['slide_number'],
-    'key_points': r.get('key_points', []),
-    'scores': r.get('scores', {})
-} for r in slide_reviews if not r.get('error')], indent=2)}
-
-Provide a comprehensive review using these exact sections:
-
-OVERALL ASSESSMENT:
-- Main objectives and target audience
-- Presentation flow and structure
-- Technical depth and clarity
-
-KEY STRENGTHS:
-- List major effective elements
-- Highlight successful aspects
-
-CRITICAL IMPROVEMENTS:
-- List essential changes needed
-- Identify major issues
-
-RECOMMENDATIONS:
-[REQUIRED] Essential improvements:
-- List critical changes needed
-
-[OPTIONAL] Enhancements:
-- List suggested improvements
-
-OVERALL SCORES (using ★):
-Content Organization: (1-5 stars)
-Visual Design: (1-5 stars)
-Technical Quality: (1-5 stars)
-Presentation Impact: (1-5 stars)"""
-
-            response = self.client.invoke([HumanMessage(content=prompt)])
-
-            if not response or not hasattr(response, 'content'):
-                raise ValueError("Invalid AI response for overall review")
-
-            return {
-                'content': response.content,
-                'scores': self._extract_scores(response.content),
-                'recommendations': self._extract_recommendations(response.content)
-            }
-
-        except Exception as e:
-            error_msg = f"Overall review generation failed: {str(e)}"
-            logging.error(error_msg)
-            return {
-                'content': error_msg,
-                'scores': {},
-                'recommendations': {'required': [], 'optional': []}
-            }
-
-    def review_presentation(self, sections: List[Dict[str, Any]], expertise: str, temperature: float = 0.7) -> Dict[str, Any]:
-        """Review a presentation slide by slide with bias-based temperature."""
-        try:
-            if not sections:
-                raise ValueError("No sections provided for review")
-
-            self.client = ChatOpenAI(
-                temperature=temperature,
-                openai_api_key=st.secrets["openai_api_key"],
-                model=self.model
-            )
-
-            slide_reviews = []
-            overall_structure = []
-
-            for section in sections:
-                if section.get('type') == 'slide':
-                    if not section.get('content'):
-                        logging.warning(f"Skipping slide {section.get('number', '?')} - no content")
-                        continue
-
-                    review = self._review_slide(section, expertise)
-                    if not review.get('error'):
-                        formatted_content = self._format_review_text(review['content'])
-                        review['content'] = formatted_content
-                        slide_reviews.append(review)
-                        
-                        overall_structure.append({
-                            'slide_number': section.get('number', len(overall_structure) + 1),
-                            'content_type': self._identify_slide_type(section['content']),
-                            'key_points': review.get('key_points', [])
-                        })
-                    else:
-                        logging.error(f"Error in slide {section.get('number', '?')}: {review.get('error')}")
-
-            if not slide_reviews:
-                raise ValueError("No valid slides were processed")
-
-            overall_review = self._generate_overall_review(slide_reviews, overall_structure, expertise)
-            if not overall_review or not overall_review.get('content'):
-                raise ValueError("Failed to generate overall review")
-
-            overall_review['content'] = self._format_review_text(overall_review['content'])
-
-            return {
-                'slide_reviews': slide_reviews,
-                'overall_review': overall_review,
-                'structure_analysis': overall_structure
-            }
-
-        except Exception as e:
-            error_msg = f"Presentation review failed: {str(e)}"
-            logging.error(error_msg)
-            return {
-                'error': True,
-                'message': error_msg,
-                'slide_reviews': [],
-                'overall_review': {'content': error_msg},
-                'structure_analysis': []
-            }
 
 class ReviewManager:
     def __init__(self):
