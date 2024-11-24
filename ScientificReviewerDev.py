@@ -897,86 +897,89 @@ Please provide a comprehensive review using this structure:
    [OPTIONAL] Suggested improvements"""
 
 class PresentationReviewer:
-    """Specialized reviewer for PowerPoint presentations."""
+    """Specialized reviewer for PowerPoint presentations with improved error handling."""
     
-    def __init__(self, model="gpt-4o"):
+    def __init__(self, model="gpt-4-turbo-preview"):
         self.model = model
+        self.client = ChatOpenAI(
+            temperature=0.1,
+            openai_api_key=st.secrets["openai_api_key"],
+            model=model
+        )
     
     def review_presentation(self, sections: List[Dict[str, Any]], expertise: str) -> Dict[str, Any]:
-        """Review a presentation slide by slide."""
-        slide_reviews = []
-        overall_structure = []
-        
-        # Review each slide
-        for section in sections:
-            if section['type'] == 'slide':
-                review = self._review_slide(section, expertise)
-                slide_reviews.append(review)
-                overall_structure.append({
-                    'slide_number': section.get('number', 1),
-                    'content_type': self._identify_slide_type(section['content']),
-                    'key_points': review.get('key_points', [])
-                })
-        
-        # Generate overall presentation review
-        overall_review = self._generate_overall_review(slide_reviews, overall_structure, expertise)
-        
-        return {
-            'slide_reviews': slide_reviews,
-            'overall_review': overall_review,
-            'structure_analysis': overall_structure
-        }
+        """Review a presentation slide by slide with enhanced validation."""
+        try:
+            if not sections or not isinstance(sections, list):
+                raise ValueError("Invalid or empty sections provided")
+            
+            slide_reviews = []
+            overall_structure = []
+            
+            # Review each slide
+            for section in sections:
+                if not isinstance(section, dict) or 'type' not in section:
+                    logging.warning(f"Skipping invalid section: {section}")
+                    continue
+                    
+                if section['type'] == 'slide':
+                    if 'content' not in section or not section['content']:
+                        logging.warning(f"Skipping slide {section.get('number', 'unknown')} - missing content")
+                        continue
+                        
+                    try:
+                        review = self._review_slide(section, expertise)
+                        if review.get('error'):
+                            logging.error(f"Error in slide {section.get('number', 'unknown')}: {review['error']}")
+                        else:
+                            slide_reviews.append(review)
+                            overall_structure.append({
+                                'slide_number': section.get('number', len(overall_structure) + 1),
+                                'content_type': self._identify_slide_type(section['content']),
+                                'key_points': review.get('key_points', [])
+                            })
+                    except Exception as e:
+                        logging.error(f"Error reviewing slide {section.get('number', 'unknown')}: {str(e)}")
+            
+            if not slide_reviews:
+                raise ValueError("No valid slides were processed")
+            
+            # Generate overall presentation review
+            overall_review = self._generate_overall_review(slide_reviews, overall_structure, expertise)
+            if not overall_review or not overall_review.get('content'):
+                raise ValueError("Failed to generate overall review")
+            
+            return {
+                'slide_reviews': slide_reviews,
+                'overall_review': overall_review,
+                'structure_analysis': overall_structure
+            }
+            
+        except Exception as e:
+            error_msg = f"Presentation review failed: {str(e)}"
+            logging.error(error_msg)
+            return {
+                'error': True,
+                'message': error_msg,
+                'slide_reviews': [],
+                'overall_review': {'content': error_msg},
+                'structure_analysis': []
+            }
     
     def _review_slide(self, slide: Dict[str, Any], expertise: str) -> Dict[str, Any]:
-        """Review an individual slide."""
-        prompt = f"""As a {expertise}, review this presentation slide:
-
-Slide {slide.get('number', 1)}:
-{slide['content']}
-
-Provide a structured analysis:
-
-1. SLIDE PURPOSE:
-   - Main message/objective
-   - Target audience relevance
-   - Position in presentation flow
-
-2. CONTENT ANALYSIS:
-   - Key points
-   - Technical accuracy
-   - Data presentation (if applicable)
-   - Supporting evidence
-
-3. VISUAL DESIGN:
-   - Layout effectiveness
-   - Visual hierarchy
-   - Use of space
-   - Graphics and images
-
-4. COMMUNICATION:
-   - Clarity of message
-   - Text conciseness
-   - Technical level appropriateness
-
-5. RECOMMENDATIONS:
-   [REQUIRED] Critical improvements needed
-   [OPTIONAL] Enhancement suggestions
-
-6. SLIDE SCORE (1-5 stars):
-   - Content Quality: ★☆☆☆☆
-   - Visual Design: ★☆☆☆☆
-   - Communication Effectiveness: ★☆☆☆☆"""
-
+        """Review an individual slide with improved error handling."""
         try:
-            agent = ChatOpenAI(
-                temperature=0.1,
-                openai_api_key=st.secrets["openai_api_key"],
-                model=self.model
-            )
-            response = agent.invoke([HumanMessage(content=prompt)])
+            if not slide.get('content'):
+                raise ValueError("Empty slide content")
+                
+            prompt = self._create_slide_review_prompt(slide, expertise)
+            response = self.client.invoke([HumanMessage(content=prompt)])
             
+            if not response or not hasattr(response, 'content'):
+                raise ValueError("Invalid AI response")
+                
             # Parse the review response
-            review = {
+            parsed_review = {
                 'slide_number': slide.get('number', 1),
                 'content': response.content,
                 'scores': self._extract_scores(response.content),
@@ -984,138 +987,147 @@ Provide a structured analysis:
                 'recommendations': self._extract_recommendations(response.content)
             }
             
-            return review
+            # Validate parsed content
+            if not parsed_review['content']:
+                raise ValueError("Empty review content")
+                
+            return parsed_review
+            
         except Exception as e:
-            logging.error(f"Error reviewing slide {slide.get('number', 1)}: {e}")
+            error_msg = f"Slide review failed: {str(e)}"
+            logging.error(error_msg)
             return {
                 'slide_number': slide.get('number', 1),
-                'error': str(e)
+                'error': error_msg,
+                'content': f"Review failed for slide {slide.get('number', 1)}: {str(e)}"
             }
+    
+    def _create_slide_review_prompt(self, slide: Dict[str, Any], expertise: str) -> str:
+        """Create a detailed prompt for slide review."""
+        return f"""As a {expertise}, review this presentation slide:
+
+Slide Number: {slide.get('number', 1)}
+
+Content:
+{slide['content']}
+
+Provide a structured analysis using the following format:
+
+SLIDE PURPOSE:
+- Main message and objective
+- Target audience relevance
+- Flow position
+
+CONTENT ANALYSIS:
+- Key points
+- Technical accuracy
+- Data presentation
+- Supporting evidence
+
+VISUAL DESIGN:
+- Layout effectiveness
+- Visual hierarchy
+- Space utilization
+- Graphics/images
+
+COMMUNICATION:
+- Message clarity
+- Text conciseness
+- Technical appropriateness
+
+RECOMMENDATIONS:
+[REQUIRED] Critical improvements
+[OPTIONAL] Enhancement suggestions
+
+SCORING:
+Rate each aspect (1-5 stars, ★):
+- Content Quality: 
+- Visual Design: 
+- Communication: 
+
+Please provide specific, actionable feedback for each section."""
     
     def _generate_overall_review(self, slide_reviews: List[Dict[str, Any]], 
                                structure: List[Dict[str, Any]], expertise: str) -> Dict[str, Any]:
-        """Generate overall presentation review."""
-        prompt = f"""As a {expertise}, synthesize this complete presentation review:
+        """Generate overall presentation review with validation."""
+        try:
+            if not slide_reviews:
+                raise ValueError("No slide reviews to analyze")
+                
+            prompt = f"""As a {expertise}, synthesize this presentation review:
 
-Structure Summary:
+Structure Overview:
 {json.dumps(structure, indent=2)}
 
-Individual Slide Reviews:
-{json.dumps([r.get('content', '') for r in slide_reviews], indent=2)}
+Individual Reviews Summary:
+{json.dumps([r.get('content', '') for r in slide_reviews if not r.get('error')], indent=2)}
 
-Provide a comprehensive review:
+Provide a comprehensive review using this structure:
 
-1. PRESENTATION OVERVIEW:
-   - Main objectives
-   - Target audience fit
-   - Story/flow effectiveness
+1. OVERALL ASSESSMENT
+- Main objectives and audience fit
+- Presentation flow and structure
+- Technical depth and clarity
 
-2. STRUCTURE ANALYSIS:
-   - Logical flow
-   - Section transitions
-   - Time allocation
-   - Content balance
+2. KEY STRENGTHS
 
-3. CONTENT QUALITY:
-   - Technical depth
-   - Evidence support
-   - Data presentation
-   - Message clarity
+3. CRITICAL IMPROVEMENTS
 
-4. VISUAL CONSISTENCY:
-   - Design template
-   - Color scheme
-   - Typography
-   - Branding elements
+4. RECOMMENDATIONS
+[REQUIRED] Essential changes
+[OPTIONAL] Enhancements
 
-5. KEY STRENGTHS AND WEAKNESSES:
-   - Major effective elements
-   - Critical improvement areas
-
-6. RECOMMENDATIONS:
-   [REQUIRED] Essential improvements
-   [OPTIONAL] Enhancement suggestions
-
-7. OVERALL SCORES (1-5 stars):
-   - Content Organization: ★☆☆☆☆
-   - Visual Design: ★☆☆☆☆
-   - Technical Quality: ★☆☆☆☆
-   - Presentation Impact: ★☆☆☆☆"""
-
-        try:
-            agent = ChatOpenAI(
-                temperature=0.1,
-                openai_api_key=st.secrets["openai_api_key"],
-                model=self.model
-            )
-            response = agent.invoke([HumanMessage(content=prompt)])
+5. OVERALL SCORES (1-5 stars, ★)
+- Content Organization
+- Visual Design
+- Technical Quality
+- Presentation Impact"""
+            
+            response = self.client.invoke([HumanMessage(content=prompt)])
+            
+            if not response or not hasattr(response, 'content'):
+                raise ValueError("Invalid AI response for overall review")
             
             return {
                 'content': response.content,
                 'scores': self._extract_scores(response.content),
                 'recommendations': self._extract_recommendations(response.content)
             }
+            
         except Exception as e:
-            logging.error(f"Error generating overall review: {e}")
-            return {'error': str(e)}
-    
+            error_msg = f"Overall review generation failed: {str(e)}"
+            logging.error(error_msg)
+            return {
+                'content': error_msg,
+                'scores': {},
+                'recommendations': {'required': [], 'optional': []}
+            }
+
     def _identify_slide_type(self, content: str) -> str:
-        """Identify the type/purpose of a slide."""
-        slide_types = {
-            'title': ['agenda', 'outline', 'overview', 'content'],
-            'introduction': ['introduction', 'background', 'context'],
-            'methods': ['methods', 'methodology', 'approach', 'procedure'],
-            'results': ['results', 'findings', 'data', 'analysis'],
-            'discussion': ['discussion', 'implications', 'interpretation'],
-            'conclusion': ['conclusion', 'summary', 'takeaways'],
-            'references': ['references', 'citations', 'bibliography']
-        }
-        
-        content_lower = content.lower()
-        for slide_type, keywords in slide_types.items():
-            if any(keyword in content_lower for keyword in keywords):
-                return slide_type
-        return 'content'  # default type
-    
-    def _extract_scores(self, content: str) -> Dict[str, int]:
-        """Extract numerical scores from review content."""
-        scores = {}
-        score_pattern = r'(\w+(?:\s+\w+)*)\s*:\s*([★]+(?:☆)*)'
-        
-        matches = re.finditer(score_pattern, content)
-        for match in matches:
-            category = match.group(1).strip()
-            stars = match.group(2)
-            scores[category] = stars.count('★')
-        
-        return scores
-    
-    def _extract_key_points(self, content: str) -> List[str]:
-        """Extract key points from review content."""
-        points = []
-        if 'Key points' in content:
-            section = content.split('Key points')[1].split('\n\n')[0]
-            points = [point.strip('- ').strip() for point in section.split('\n') 
-                     if point.strip('- ').strip()]
-        return points
-    
-    def _extract_recommendations(self, content: str) -> Dict[str, List[str]]:
-        """Extract recommendations from review content."""
-        recommendations = {'required': [], 'optional': []}
-        
-        if '[REQUIRED]' in content:
-            required_section = content.split('[REQUIRED]')[1].split('[OPTIONAL]')[0]
-            recommendations['required'] = [rec.strip('- ').strip() 
-                                        for rec in required_section.split('\n') 
-                                        if rec.strip('- ').strip()]
-        
-        if '[OPTIONAL]' in content:
-            optional_section = content.split('[OPTIONAL]')[1].split('\n\n')[0]
-            recommendations['optional'] = [rec.strip('- ').strip() 
-                                        for rec in optional_section.split('\n') 
-                                        if rec.strip('- ').strip()]
-        
-        return recommendations
+        """Identify the type/purpose of a slide with error handling."""
+        try:
+            if not content:
+                return 'unknown'
+                
+            content_lower = content.lower()
+            slide_types = {
+                'title': ['title', 'agenda', 'outline', 'overview'],
+                'introduction': ['introduction', 'background', 'context'],
+                'methods': ['methods', 'methodology', 'approach'],
+                'results': ['results', 'findings', 'data'],
+                'discussion': ['discussion', 'implications'],
+                'conclusion': ['conclusion', 'summary', 'takeaways'],
+                'references': ['references', 'citations']
+            }
+            
+            for slide_type, keywords in slide_types.items():
+                if any(keyword in content_lower for keyword in keywords):
+                    return slide_type
+            return 'content'
+            
+        except Exception as e:
+            logging.error(f"Error identifying slide type: {str(e)}")
+            return 'unknown'
 
 def main():
     st.title("Scientific Review System")
