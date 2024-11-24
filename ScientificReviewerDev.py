@@ -9,6 +9,7 @@ import json
 from datetime import datetime
 from typing import Dict, List, Any, Tuple
 import re
+import time
 
 # Configure logging and OpenAI client
 logging.basicConfig(level=logging.INFO)
@@ -1146,10 +1147,9 @@ class PresentationReviewer:
     """Specialized reviewer for PowerPoint presentations."""
     
     def __init__(self, model="gpt-4o"):
-        """Initialize the reviewer with model configuration."""
         self.model = model
-        self.client = None  # Will be initialized during review
-    
+        self.client = None
+
     def review_presentation(self, sections: List[Dict[str, Any]], expertise: str, temperature: float = 0.7) -> Dict[str, Any]:
         """Review a presentation slide by slide."""
         try:
@@ -1165,27 +1165,40 @@ class PresentationReviewer:
 
             slide_reviews = []
             overall_structure = []
+            slide_sections = [s for s in sections if s.get('type') == 'slide']
 
             # Review each slide
-            for section in sections:
-                if section.get('type') == 'slide':
+            for slide_num, section in enumerate(slide_sections, 1):
+                try:
                     if not section.get('content'):
-                        logging.warning(f"Skipping slide {section.get('number', '?')} - no content")
+                        logging.warning(f"Skipping slide {slide_num} - no content")
                         continue
 
+                    # Update slide number to ensure correct sequence
+                    section['number'] = slide_num
+                    
                     review = self._review_slide(section, expertise)
                     if not review.get('error'):
                         formatted_content = self._format_review_text(review['content'])
                         review['content'] = formatted_content
+                        review['slide_number'] = slide_num  # Ensure slide number is set
                         slide_reviews.append(review)
                         
                         overall_structure.append({
-                            'slide_number': section.get('number', len(overall_structure) + 1),
+                            'slide_number': slide_num,
                             'content_type': self._identify_slide_type(section['content']),
                             'key_points': review.get('key_points', [])
                         })
                     else:
-                        logging.error(f"Error in slide {section.get('number', '?')}: {review.get('error')}")
+                        logging.error(f"Error in slide {slide_num}: {review.get('error')}")
+
+                except Exception as e:
+                    logging.error(f"Error processing slide {slide_num}: {str(e)}")
+                    slide_reviews.append({
+                        'slide_number': slide_num,
+                        'error': True,
+                        'content': f"Review failed for slide {slide_num}: {str(e)}"
+                    })
 
             if not slide_reviews:
                 raise ValueError("No valid slides were processed")
@@ -1197,11 +1210,23 @@ class PresentationReviewer:
 
             overall_review['content'] = self._format_review_text(overall_review['content'])
 
-            return {
+            # Validate and sort slide reviews
+            slide_reviews.sort(key=lambda x: x.get('slide_number', float('inf')))
+
+            result = {
                 'slide_reviews': slide_reviews,
                 'overall_review': overall_review,
                 'structure_analysis': overall_structure
             }
+
+            # Validate the result structure
+            if not all(r.get('slide_number') is not None for r in result['slide_reviews']):
+                logging.error("Some slide reviews are missing slide numbers")
+            
+            if not result['overall_review'].get('content'):
+                logging.error("Overall review is missing content")
+
+            return result
 
         except Exception as e:
             error_msg = f"Presentation review failed: {str(e)}"
@@ -1263,25 +1288,46 @@ Content Quality: (1-5 stars)
 Visual Design: (1-5 stars)
 Communication Effectiveness: (1-5 stars)"""
 
-            response = self.client.invoke([HumanMessage(content=prompt)])
-            if not response or not hasattr(response, 'content'):
-                raise ValueError("Invalid AI response")
+            # Add retry logic for robustness
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    response = self.client.invoke([HumanMessage(content=prompt)])
+                    if not response or not hasattr(response, 'content'):
+                        raise ValueError("Invalid AI response")
 
-            content = response.content
-            return {
-                'slide_number': slide.get('number', 1),
-                'content': content,
-                'scores': self._extract_scores(content),
-                'key_points': self._extract_key_points(content),
-                'recommendations': self._extract_recommendations(content)
-            }
+                    content = response.content
+                    
+                    # Validate response structure
+                    if not any(section in content for section in ['SLIDE PURPOSE', 'CONTENT ANALYSIS', 'RECOMMENDATIONS']):
+                        raise ValueError("Response missing required sections")
+
+                    review = {
+                        'slide_number': slide.get('number', 1),
+                        'content': content,
+                        'scores': self._extract_scores(content),
+                        'key_points': self._extract_key_points(content),
+                        'recommendations': self._extract_recommendations(content)
+                    }
+
+                    # Validate review structure
+                    if not review['scores'] or not review['key_points']:
+                        raise ValueError("Review missing required components")
+
+                    return review
+
+                except Exception as e:
+                    if attempt == max_retries - 1:
+                        raise
+                    logging.warning(f"Retry {attempt + 1} for slide {slide.get('number', 1)}: {str(e)}")
+                    time.sleep(1)  # Brief pause before retry
 
         except Exception as e:
             error_msg = f"Slide review failed: {str(e)}"
             logging.error(error_msg)
             return {
                 'slide_number': slide.get('number', 1),
-                'error': error_msg,
+                'error': True,
                 'content': f"Review failed for slide {slide.get('number', 1)}: {str(e)}"
             }
 
