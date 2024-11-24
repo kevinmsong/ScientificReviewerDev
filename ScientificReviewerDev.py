@@ -578,39 +578,24 @@ class ReviewManager:
         }
         self.moderator = ModeratorAgent()
     
-    def _create_previous_context(self, reviews: List[Dict[str, Any]]) -> str:
-        """Create context from previous reviews."""
-        if not reviews:
-            return ""
-            
-        context = "\nPrevious reviews:\n"
-        for review in reviews:
-            if not review.get('error', False):
-                if review.get('is_presentation', False):
-                    # Handle presentation reviews differently
-                    context += f"\n{review['reviewer']} Overall Assessment:\n{review['content']}\n"
-                    
-                    # Add key points from slide reviews
-                    context += "\nKey points from slides:\n"
-                    for slide_review in review.get('slide_reviews', []):
-                        if not slide_review.get('error'):
-                            context += f"Slide {slide_review['slide_number']}: "
-                            context += f"{'; '.join(slide_review.get('key_points', []))}\n"
-                else:
-                    # Handle regular document reviews
-                    context += f"\n{review['reviewer']}:\n{review['content']}\n"
+    def _calculate_temperature(self, bias: int) -> float:
+        """Calculate temperature based on reviewer bias."""
+        # Base temperature of 0.7, adjusted by bias
+        return max(0.0, min(1.0, 0.7 + (bias * 0.1)))
         
-        return context
-
     def process_review(self, content: str, sections: List[Dict[str, Any]], config: Dict[str, Any]) -> Dict[str, Any]:
         """Process document review with multiple iterations and moderation."""
         iterations = []
         all_reviews = []
         
         try:
+            # Check if it's a PowerPoint file
             is_presentation = any(section.get('type') == 'slide' for section in sections)
             if is_presentation:
                 config['doc_type'] = "Presentation"
+            
+            # Calculate temperature once based on global bias setting
+            temperature = self._calculate_temperature(config.get('bias', 0))
             
             for iteration in range(config['iterations']):
                 iteration_reviews = []
@@ -618,18 +603,17 @@ class ReviewManager:
                 
                 for reviewer in config['reviewers']:
                     try:
-                        temperature = self._calculate_temperature(config.get('bias', 0))
                         model = self.model_config.get(config['doc_type'], "gpt-4o")
                         
                         if is_presentation:
-                            presentation_reviewer = PresentationReviewer(model=model)
+                            presentation_reviewer = PresentationReviewer(
+                                model=model,
+                                temperature=temperature  # Pass temperature to PresentationReviewer
+                            )
                             review_results = presentation_reviewer.review_presentation(
                                 sections=sections,
                                 expertise=reviewer['expertise']
                             )
-                            
-                            if not review_results.get('overall_review', {}).get('content'):
-                                raise ValueError("Missing review content from presentation reviewer")
                             
                             review = {
                                 'reviewer': reviewer['expertise'],
@@ -641,7 +625,7 @@ class ReviewManager:
                             }
                         else:
                             agent = ChatOpenAI(
-                                temperature=temperature,
+                                temperature=temperature,  # Use calculated temperature
                                 openai_api_key=st.secrets["openai_api_key"],
                                 model=model
                             )
@@ -651,15 +635,15 @@ class ReviewManager:
                                 reviewer=reviewer,
                                 config=config,
                                 iteration=iteration + 1,
-                                previous_context=previous_context
+                                previous_context=previous_context,
+                                temperature=temperature  # Pass temperature to content processor
                             )
                         
                         iteration_reviews.append(review)
                         all_reviews.append(review)
                         
                     except Exception as e:
-                        error_msg = f"Error in review by {reviewer['expertise']}: {str(e)}"
-                        logging.error(error_msg)
+                        logging.error(f"Error in review by {reviewer['expertise']}: {str(e)}")
                         iteration_reviews.append({
                             'reviewer': reviewer['expertise'],
                             'content': f"Review failed: {str(e)}",
@@ -672,11 +656,7 @@ class ReviewManager:
                     'reviews': iteration_reviews
                 })
             
-            # Generate moderator summary if we have valid reviews
-            if any(not review.get('error', False) for reviews in iterations for review in reviews['reviews']):
-                moderator_summary = self.moderator.summarize_discussion(iterations)
-            else:
-                moderator_summary = "No valid reviews to summarize"
+            moderator_summary = self.moderator.summarize_discussion(iterations)
             
             return {
                 'iterations': iterations,
@@ -688,14 +668,105 @@ class ReviewManager:
             }
             
         except Exception as e:
-            error_msg = f"Error in review process: {str(e)}"
-            logging.error(error_msg)
-            raise ValueError(error_msg)
+            logging.error(f"Error in review process: {str(e)}")
+            raise
+
+class PresentationReviewer:
+    def __init__(self, model="gpt-4o", temperature=0.7):
+        self.model = model
+        self.client = ChatOpenAI(
+            temperature=temperature,  # Use provided temperature
+            openai_api_key=st.secrets["openai_api_key"],
+            model=model
+        )
+
+    def _create_review_prompt(self, slide: Dict[str, Any], expertise: str, bias: int) -> str:
+        """Create review prompt with bias guidance."""
+        bias_guidance = ""
+        if bias < 0:
+            bias_guidance = """Focus on identifying areas for improvement and potential issues. 
+Be particularly thorough in highlighting weaknesses and suggesting critical changes."""
+        elif bias > 0:
+            bias_guidance = """Emphasize the strengths and effective elements of the presentation.
+While noting necessary improvements, maintain an encouraging and constructive tone."""
             
-    def _calculate_temperature(self, bias: int) -> float:
-        """Calculate temperature based on reviewer bias while keeping it within valid range."""
-        # Base temperature of 0.7, adjusted by bias but kept within [0.0, 1.0]
-        return max(0.0, min(1.0, 0.7 + (bias * 0.1)))
+        return f"""As a {expertise}, review this presentation slide with the following perspective:
+{bias_guidance}
+
+Slide {slide.get('number', 1)} Content:
+{slide['content']}
+
+Provide a structured analysis using these exact sections:
+
+SLIDE PURPOSE:
+- Main message and objective
+- Target audience relevance
+- Position in presentation flow
+
+CONTENT ANALYSIS:
+- Key points and main ideas
+- Technical accuracy
+- Supporting evidence
+- Data presentation (if applicable)
+
+VISUAL DESIGN:
+- Layout effectiveness
+- Visual hierarchy
+- Space utilization
+- Graphics and images effectiveness
+
+COMMUNICATION:
+- Clarity of message
+- Text conciseness
+- Audience engagement
+- Technical language appropriateness
+
+RECOMMENDATIONS:
+[REQUIRED] Critical improvements needed:
+- List specific required changes
+
+[OPTIONAL] Enhancement suggestions:
+- List potential improvements
+
+SCORING:
+Rate each aspect (using ★):
+Content Quality: (1-5 stars)
+Visual Design: (1-5 stars)
+Communication Effectiveness: (1-5 stars)"""
+
+    def _review_slide(self, slide: Dict[str, Any], expertise: str) -> Dict[str, Any]:
+        """Review individual slide with potential bias."""
+        try:
+            if not slide.get('content'):
+                raise ValueError("Empty slide content")
+
+            # Create prompt with bias guidance
+            prompt = self._create_review_prompt(slide, expertise, bias=0)  # Get bias from config
+            response = self.client.invoke([HumanMessage(content=prompt)])
+            
+            if not response or not hasattr(response, 'content'):
+                raise ValueError("Invalid AI response")
+
+            content = response.content
+            
+            review = {
+                'slide_number': slide.get('number', 1),
+                'content': content,
+                'scores': self._extract_scores(content),
+                'key_points': self._extract_key_points(content),
+                'recommendations': self._extract_recommendations(content)
+            }
+
+            return review
+
+        except Exception as e:
+            error_msg = f"Slide review failed: {str(e)}"
+            logging.error(error_msg)
+            return {
+                'slide_number': slide.get('number', 1),
+                'error': error_msg,
+                'content': f"Review failed for slide {slide.get('number', 1)}: {str(e)}"
+            }
 
 class ReviewManager(ReviewManager):  # Continuing the ReviewManager class
     def _create_review_prompt(self, doc_type: str, expertise: str, scoring_type: str, 
@@ -843,6 +914,8 @@ Please provide a comprehensive review using this structure:
    [OPTIONAL] Suggested improvements"""
 
 class PresentationReviewer:
+    """Specialized reviewer for PowerPoint presentations."""
+    
     def __init__(self, model="gpt-4o"):
         self.model = model
         self.client = ChatOpenAI(
@@ -851,258 +924,171 @@ class PresentationReviewer:
             model=model
         )
 
-    def review_presentation(self, sections: List[Dict[str, Any]], expertise: str) -> Dict[str, Any]:
-        """Review a presentation slide by slide with comprehensive analysis."""
+    def _extract_scores(self, content: str) -> Dict[str, int]:
+        """Extract numerical scores from review content."""
+        scores = {}
         try:
-            if not sections:
-                raise ValueError("No sections provided for review")
-
-            slide_reviews = []
-            overall_structure = []
-
-            # Review each slide
-            for section in sections:
-                if section.get('type') == 'slide':
-                    if not section.get('content'):
-                        logging.warning(f"Skipping slide {section.get('number', '?')} - no content")
-                        continue
-
-                    review = self._review_slide(section, expertise)
-                    if not review.get('error'):
-                        formatted_content = self._format_review_text(review['content'])
-                        review['content'] = formatted_content
-                        slide_reviews.append(review)
-                        
-                        overall_structure.append({
-                            'slide_number': section.get('number', len(overall_structure) + 1),
-                            'content_type': self._identify_slide_type(section['content']),
-                            'key_points': review.get('key_points', [])
-                        })
+            patterns = [
+                # Match star ratings (★)
+                r'([^:\n]+):\s*(★+(?:☆)*)(?=\s|$)',
+                # Match numeric ratings with "stars" or "star"
+                r'([^:\n]+):\s*(\d+)(?:\s*stars?)?(?=\s|$)',
+                # Match X/5 format
+                r'([^:\n]+):\s*(\d+)/5(?=\s|$)'
+            ]
+            
+            for pattern in patterns:
+                matches = re.finditer(pattern, content, re.MULTILINE)
+                for match in matches:
+                    category = match.group(1).strip()
+                    score_text = match.group(2).strip()
+                    
+                    # Convert to numeric score
+                    if '★' in score_text:
+                        score = score_text.count('★')
                     else:
-                        logging.error(f"Error in slide {section.get('number', '?')}: {review.get('error')}")
-
-            if not slide_reviews:
-                raise ValueError("No valid slides were processed")
-
-            # Generate overall presentation review
-            overall_review = self._generate_overall_review(slide_reviews, overall_structure, expertise)
-            if not overall_review or not overall_review.get('content'):
-                raise ValueError("Failed to generate overall review")
-
-            overall_review['content'] = self._format_review_text(overall_review['content'])
-
-            return {
-                'slide_reviews': slide_reviews,
-                'overall_review': overall_review,
-                'structure_analysis': overall_structure
-            }
-
+                        try:
+                            score = int(float(score_text))
+                        except ValueError:
+                            continue
+                    
+                    # Normalize score to 1-5 range
+                    score = max(1, min(5, score))
+                    scores[category] = score
+            
+            return scores
         except Exception as e:
-            error_msg = f"Presentation review failed: {str(e)}"
-            logging.error(error_msg)
-            return {
-                'error': True,
-                'message': error_msg,
-                'slide_reviews': [],
-                'overall_review': {'content': error_msg},
-                'structure_analysis': []
-            }
+            logging.error(f"Error extracting scores: {str(e)}")
+            return {}
 
-    def _identify_slide_type(self, content: str) -> str:
-        """Identify the type/purpose of a slide."""
+    def _extract_key_points(self, content: str) -> List[str]:
+        """Extract key points from review content."""
+        key_points = []
         try:
-            if not content:
-                return 'unknown'
-
-            content_lower = content.lower()
-            slide_types = {
-                'title': ['title', 'agenda', 'outline', 'overview'],
-                'introduction': ['introduction', 'background', 'context'],
-                'methods': ['methods', 'methodology', 'approach'],
-                'results': ['results', 'findings', 'data'],
-                'discussion': ['discussion', 'implications'],
-                'conclusion': ['conclusion', 'summary', 'takeaways'],
-                'references': ['references', 'citations']
-            }
-
-            for slide_type, keywords in slide_types.items():
-                if any(keyword in content_lower for keyword in keywords):
-                    return slide_type
-            return 'content'  # default type
-
+            # Common section headers where key points might be found
+            sections = [
+                'CONTENT ANALYSIS',
+                'KEY POINTS',
+                'MAIN POINTS',
+                'SLIDE PURPOSE'
+            ]
+            
+            # Find content under these sections
+            for section in sections:
+                pattern = fr'{section}:?(.*?)(?=\n\n[A-Z\s]+:|$)'
+                matches = re.search(pattern, content, re.DOTALL | re.IGNORECASE)
+                if matches:
+                    section_text = matches.group(1).strip()
+                    # Extract bullet points or numbered items
+                    points = re.findall(r'(?:^|\n)\s*[-•*]\s*(.*?)(?=\n|$)', section_text)
+                    if not points:  # Try numbered lists if no bullet points
+                        points = re.findall(r'(?:^|\n)\s*\d+\.\s*(.*?)(?=\n|$)', section_text)
+                    
+                    points = [p.strip() for p in points if p.strip()]
+                    if points:
+                        key_points.extend(points)
+                        break  # Stop after finding points in one section
+            
+            # If no structured points found, try to extract key sentences
+            if not key_points:
+                sentences = re.split(r'(?<=[.!?])\s+', content)
+                key_points = [s.strip() for s in sentences if len(s.strip()) > 20 and len(s.strip()) < 200][:3]
+            
+            return key_points[:5]  # Limit to top 5 points
+        
         except Exception as e:
-            logging.error(f"Error identifying slide type: {str(e)}")
-            return 'unknown'
+            logging.error(f"Error extracting key points: {str(e)}")
+            return []
+
+    def _extract_recommendations(self, content: str) -> Dict[str, List[str]]:
+        """Extract recommendations from review content."""
+        recommendations = {'required': [], 'optional': []}
+        try:
+            # Extract required recommendations
+            required_patterns = [
+                r'\[REQUIRED\](.*?)(?=\[OPTIONAL\]|\n\n[A-Z]|\Z)',
+                r'Critical improvements needed:(.*?)(?=\n\n[A-Z]|\Z)',
+                r'Essential improvements:(.*?)(?=\n\n[A-Z]|\Z)'
+            ]
+            
+            # Extract optional recommendations
+            optional_patterns = [
+                r'\[OPTIONAL\](.*?)(?=\n\n[A-Z]|\Z)',
+                r'Enhancement suggestions?:(.*?)(?=\n\n[A-Z]|\Z)',
+                r'Suggested improvements:(.*?)(?=\n\n[A-Z]|\Z)'
+            ]
+            
+            def extract_points(patterns: List[str], content: str) -> List[str]:
+                for pattern in patterns:
+                    matches = re.search(pattern, content, re.DOTALL | re.IGNORECASE)
+                    if matches:
+                        section_text = matches.group(1).strip()
+                        points = re.findall(r'(?:^|\n)\s*[-•*]\s*(.*?)(?=\n|$)', section_text)
+                        if not points:  # Try numbered lists if no bullet points
+                            points = re.findall(r'(?:^|\n)\s*\d+\.\s*(.*?)(?=\n|$)', section_text)
+                        points = [p.strip() for p in points if p.strip()]
+                        if points:
+                            return points
+                return []
+            
+            recommendations['required'] = extract_points(required_patterns, content)
+            recommendations['optional'] = extract_points(optional_patterns, content)
+            
+            return recommendations
+        
+        except Exception as e:
+            logging.error(f"Error extracting recommendations: {str(e)}")
+            return {'required': [], 'optional': []}
 
     def _format_review_text(self, raw_content: str) -> str:
         """Format and clean review text for better presentation."""
         try:
             # Remove excessive newlines
             content = re.sub(r'\n{3,}', '\n\n', raw_content)
-
-            # Ensure consistent heading formatting
-            content = re.sub(r'(?m)^([A-Z][A-Z\s]+):$', r'\n\1:', content)
-
+            
+            # Standardize section headers
+            content = re.sub(r'(?m)^([A-Z][A-Z\s]+):', r'\n\1:', content)
+            
             # Clean up bullet points
             content = re.sub(r'(?m)^\s*[*•]\s*', '• ', content)
-
-            # Ensure consistent star formatting
-            content = content.replace('*', '★')
-            content = re.sub(r'(?<=\d)\s*stars?\b', '★', content)
-
+            
+            # Standardize star ratings
+            content = re.sub(r'(\d)\s*stars?\b', r'\1★', content)
+            content = re.sub(r'(\d)/5', r'\1★', content)
+            
+            # Convert numeric ratings to stars
+            def replace_rating(match):
+                num = int(match.group(1))
+                return '★' * num + '☆' * (5 - num)
+            
+            content = re.sub(r'(\d)★', replace_rating, content)
+            
             return content.strip()
+            
         except Exception as e:
             logging.error(f"Error formatting review text: {str(e)}")
             return raw_content
 
-    def _review_slide(self, slide: Dict[str, Any], expertise: str) -> Dict[str, Any]:
-        """Review an individual slide with comprehensive analysis."""
-        try:
-            if not slide.get('content'):
-                raise ValueError("Empty slide content")
-
-            prompt = f"""As a {expertise}, review this presentation slide:
-
-Slide {slide.get('number', 1)} Content:
-{slide['content']}
-
-Provide a structured analysis using these exact sections:
-
-SLIDE PURPOSE:
-- Main message and objective
-- Target audience relevance
-- Position in presentation flow
-
-CONTENT ANALYSIS:
-- Key points and main ideas
-- Technical accuracy
-- Supporting evidence
-- Data presentation (if applicable)
-
-VISUAL DESIGN:
-- Layout effectiveness
-- Visual hierarchy
-- Space utilization
-- Graphics and images effectiveness
-
-COMMUNICATION:
-- Clarity of message
-- Text conciseness
-- Audience engagement
-- Technical language appropriateness
-
-RECOMMENDATIONS:
-[REQUIRED] Critical improvements needed:
-- List specific required changes
-
-[OPTIONAL] Enhancement suggestions:
-- List potential improvements
-
-SCORING:
-Rate each aspect (using ★):
-Content Quality: (1-5 stars)
-Visual Design: (1-5 stars)
-Communication Effectiveness: (1-5 stars)"""
-
-            response = self.client.invoke([HumanMessage(content=prompt)])
-
-            if not response or not hasattr(response, 'content'):
-                raise ValueError("Invalid AI response")
-
-            content = response.content
-
-            # Extract structured information
-            review = {
-                'slide_number': slide.get('number', 1),
-                'content': content,
-                'scores': self._extract_scores(content),
-                'key_points': self._extract_key_points(content),
-                'recommendations': self._extract_recommendations(content)
-            }
-
-            return review
-
-        except Exception as e:
-            error_msg = f"Slide review failed: {str(e)}"
-            logging.error(error_msg)
-            return {
-                'slide_number': slide.get('number', 1),
-                'error': error_msg,
-                'content': f"Review failed for slide {slide.get('number', 1)}: {str(e)}"
-            }
-
-    def _generate_overall_review(self, slide_reviews: List[Dict[str, Any]], 
-                               structure: List[Dict[str, Any]], expertise: str) -> Dict[str, Any]:
-        """Generate overall presentation review."""
-        try:
-            if not slide_reviews:
-                raise ValueError("No slide reviews to analyze")
-
-            # Create a summary of the presentation structure
-            structure_summary = "\n".join([
-                f"Slide {s['slide_number']}: {s['content_type'].title()}"
-                for s in structure
-            ])
-
-            prompt = f"""As a {expertise}, synthesize this complete presentation review:
-
-Presentation Structure:
-{structure_summary}
-
-Individual Slide Reviews Summary:
-{json.dumps([{
-    'slide_number': r['slide_number'],
-    'key_points': r.get('key_points', []),
-    'scores': r.get('scores', {})
-} for r in slide_reviews if not r.get('error')], indent=2)}
-
-Provide a comprehensive review using these exact sections:
-
-OVERALL ASSESSMENT:
-- Main objectives and target audience
-- Presentation flow and structure
-- Technical depth and clarity
-
-KEY STRENGTHS:
-- List major effective elements
-- Highlight successful aspects
-
-CRITICAL IMPROVEMENTS:
-- List essential changes needed
-- Identify major issues
-
-RECOMMENDATIONS:
-[REQUIRED] Essential improvements:
-- List critical changes needed
-
-[OPTIONAL] Enhancements:
-- List suggested improvements
-
-OVERALL SCORES (using ★):
-Content Organization: (1-5 stars)
-Visual Design: (1-5 stars)
-Technical Quality: (1-5 stars)
-Presentation Impact: (1-5 stars)"""
-
-            response = self.client.invoke([HumanMessage(content=prompt)])
-
-            if not response or not hasattr(response, 'content'):
-                raise ValueError("Invalid AI response for overall review")
-
-            return {
-                'content': response.content,
-                'scores': self._extract_scores(response.content),
-                'recommendations': self._extract_recommendations(response.content)
-            }
-
-        except Exception as e:
-            error_msg = f"Overall review generation failed: {str(e)}"
-            logging.error(error_msg)
-            return {
-                'content': error_msg,
-                'scores': {},
-                'recommendations': {'required': [], 'optional': []}
-            }
+    def _identify_slide_type(self, content: str) -> str:
+        """Identify the type/purpose of a slide."""
+        if not content:
+            return 'unknown'
+            
+        content_lower = content.lower()
+        slide_types = {
+            'title': ['title', 'agenda', 'outline', 'overview'],
+            'introduction': ['introduction', 'background', 'context'],
+            'methods': ['methods', 'methodology', 'approach'],
+            'results': ['results', 'findings', 'data'],
+            'discussion': ['discussion', 'implications'],
+            'conclusion': ['conclusion', 'summary', 'takeaways'],
+            'references': ['references', 'citations']
+        }
+        
+        for slide_type, keywords in slide_types.items():
+            if any(keyword in content_lower for keyword in keywords):
+                return slide_type
+        return 'content'
 
 def main():
     st.title("Scientific Review System")
