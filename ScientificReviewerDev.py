@@ -851,6 +851,110 @@ class PresentationReviewer:
             model=model
         )
 
+    def review_presentation(self, sections: List[Dict[str, Any]], expertise: str) -> Dict[str, Any]:
+        """Review a presentation slide by slide with comprehensive analysis."""
+        try:
+            if not sections:
+                raise ValueError("No sections provided for review")
+
+            slide_reviews = []
+            overall_structure = []
+
+            # Review each slide
+            for section in sections:
+                if section.get('type') == 'slide':
+                    if not section.get('content'):
+                        logging.warning(f"Skipping slide {section.get('number', '?')} - no content")
+                        continue
+
+                    review = self._review_slide(section, expertise)
+                    if not review.get('error'):
+                        formatted_content = self._format_review_text(review['content'])
+                        review['content'] = formatted_content
+                        slide_reviews.append(review)
+                        
+                        overall_structure.append({
+                            'slide_number': section.get('number', len(overall_structure) + 1),
+                            'content_type': self._identify_slide_type(section['content']),
+                            'key_points': review.get('key_points', [])
+                        })
+                    else:
+                        logging.error(f"Error in slide {section.get('number', '?')}: {review.get('error')}")
+
+            if not slide_reviews:
+                raise ValueError("No valid slides were processed")
+
+            # Generate overall presentation review
+            overall_review = self._generate_overall_review(slide_reviews, overall_structure, expertise)
+            if not overall_review or not overall_review.get('content'):
+                raise ValueError("Failed to generate overall review")
+
+            overall_review['content'] = self._format_review_text(overall_review['content'])
+
+            return {
+                'slide_reviews': slide_reviews,
+                'overall_review': overall_review,
+                'structure_analysis': overall_structure
+            }
+
+        except Exception as e:
+            error_msg = f"Presentation review failed: {str(e)}"
+            logging.error(error_msg)
+            return {
+                'error': True,
+                'message': error_msg,
+                'slide_reviews': [],
+                'overall_review': {'content': error_msg},
+                'structure_analysis': []
+            }
+
+    def _identify_slide_type(self, content: str) -> str:
+        """Identify the type/purpose of a slide."""
+        try:
+            if not content:
+                return 'unknown'
+
+            content_lower = content.lower()
+            slide_types = {
+                'title': ['title', 'agenda', 'outline', 'overview'],
+                'introduction': ['introduction', 'background', 'context'],
+                'methods': ['methods', 'methodology', 'approach'],
+                'results': ['results', 'findings', 'data'],
+                'discussion': ['discussion', 'implications'],
+                'conclusion': ['conclusion', 'summary', 'takeaways'],
+                'references': ['references', 'citations']
+            }
+
+            for slide_type, keywords in slide_types.items():
+                if any(keyword in content_lower for keyword in keywords):
+                    return slide_type
+            return 'content'  # default type
+
+        except Exception as e:
+            logging.error(f"Error identifying slide type: {str(e)}")
+            return 'unknown'
+
+    def _format_review_text(self, raw_content: str) -> str:
+        """Format and clean review text for better presentation."""
+        try:
+            # Remove excessive newlines
+            content = re.sub(r'\n{3,}', '\n\n', raw_content)
+
+            # Ensure consistent heading formatting
+            content = re.sub(r'(?m)^([A-Z][A-Z\s]+):$', r'\n\1:', content)
+
+            # Clean up bullet points
+            content = re.sub(r'(?m)^\s*[*•]\s*', '• ', content)
+
+            # Ensure consistent star formatting
+            content = content.replace('*', '★')
+            content = re.sub(r'(?<=\d)\s*stars?\b', '★', content)
+
+            return content.strip()
+        except Exception as e:
+            logging.error(f"Error formatting review text: {str(e)}")
+            return raw_content
+
     def _review_slide(self, slide: Dict[str, Any], expertise: str) -> Dict[str, Any]:
         """Review an individual slide with comprehensive analysis."""
         try:
@@ -865,7 +969,7 @@ Slide {slide.get('number', 1)} Content:
 Provide a structured analysis using these exact sections:
 
 SLIDE PURPOSE:
-- Main message/objective
+- Main message and objective
 - Target audience relevance
 - Position in presentation flow
 
@@ -901,12 +1005,12 @@ Visual Design: (1-5 stars)
 Communication Effectiveness: (1-5 stars)"""
 
             response = self.client.invoke([HumanMessage(content=prompt)])
-            
+
             if not response or not hasattr(response, 'content'):
                 raise ValueError("Invalid AI response")
 
             content = response.content
-            
+
             # Extract structured information
             review = {
                 'slide_number': slide.get('number', 1),
@@ -981,7 +1085,7 @@ Technical Quality: (1-5 stars)
 Presentation Impact: (1-5 stars)"""
 
             response = self.client.invoke([HumanMessage(content=prompt)])
-            
+
             if not response or not hasattr(response, 'content'):
                 raise ValueError("Invalid AI response for overall review")
 
