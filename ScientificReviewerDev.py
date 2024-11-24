@@ -889,6 +889,67 @@ Communication Effectiveness: (1-5 stars)"""
                 return slide_type
         return 'content'
 
+    def review_presentation(self, sections: List[Dict[str, Any]], expertise: str, temperature: float = 0.7) -> Dict[str, Any]:
+        """Review a presentation slide by slide with bias-based temperature."""
+        try:
+            if not sections:
+                raise ValueError("No sections provided for review")
+
+            self.client = ChatOpenAI(
+                temperature=temperature,
+                openai_api_key=st.secrets["openai_api_key"],
+                model=self.model
+            )
+
+            slide_reviews = []
+            overall_structure = []
+
+            for section in sections:
+                if section.get('type') == 'slide':
+                    if not section.get('content'):
+                        logging.warning(f"Skipping slide {section.get('number', '?')} - no content")
+                        continue
+
+                    review = self._review_slide(section, expertise)
+                    if not review.get('error'):
+                        formatted_content = self._format_review_text(review['content'])
+                        review['content'] = formatted_content
+                        slide_reviews.append(review)
+                        
+                        overall_structure.append({
+                            'slide_number': section.get('number', len(overall_structure) + 1),
+                            'content_type': self._identify_slide_type(section['content']),
+                            'key_points': review.get('key_points', [])
+                        })
+                    else:
+                        logging.error(f"Error in slide {section.get('number', '?')}: {review.get('error')}")
+
+            if not slide_reviews:
+                raise ValueError("No valid slides were processed")
+
+            overall_review = self._generate_overall_review(slide_reviews, overall_structure, expertise)
+            if not overall_review or not overall_review.get('content'):
+                raise ValueError("Failed to generate overall review")
+
+            overall_review['content'] = self._format_review_text(overall_review['content'])
+
+            return {
+                'slide_reviews': slide_reviews,
+                'overall_review': overall_review,
+                'structure_analysis': overall_structure
+            }
+
+        except Exception as e:
+            error_msg = f"Presentation review failed: {str(e)}"
+            logging.error(error_msg)
+            return {
+                'error': True,
+                'message': error_msg,
+                'slide_reviews': [],
+                'overall_review': {'content': error_msg},
+                'structure_analysis': []
+            }
+
 class ReviewManager:
     def __init__(self):
         self.model_config = {
