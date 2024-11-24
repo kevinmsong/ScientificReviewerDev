@@ -717,15 +717,8 @@ Content Quality: (1-5 stars)
 Visual Design: (1-5 stars)
 Communication Effectiveness: (1-5 stars)"""
 
-            # Initialize AI client for this review
-            client = ChatOpenAI(
-                temperature=0.7,
-                openai_api_key=st.secrets["openai_api_key"],
-                model=self.model
-            )
-            
-            response = client.invoke([HumanMessage(content=prompt)])
-            
+            response = self.client.invoke([HumanMessage(content=prompt)])
+
             if not response or not hasattr(response, 'content'):
                 raise ValueError("Invalid AI response")
 
@@ -751,6 +744,154 @@ Communication Effectiveness: (1-5 stars)"""
                 'content': f"Review failed for slide {slide.get('number', 1)}: {str(e)}"
             }
 
+    def _extract_scores(self, content: str) -> Dict[str, int]:
+        """Extract numerical scores from review content."""
+        scores = {}
+        try:
+            patterns = [
+                r'([^:\n]+):\s*(★+(?:☆)*)(?=\s|$)',
+                r'([^:\n]+):\s*(\d+)(?:\s*stars?)?(?=\s|$)',
+                r'([^:\n]+):\s*(\d+)/5(?=\s|$)'
+            ]
+            
+            for pattern in patterns:
+                matches = re.finditer(pattern, content, re.MULTILINE)
+                for match in matches:
+                    category = match.group(1).strip()
+                    score_text = match.group(2).strip()
+                    
+                    if '★' in score_text:
+                        score = score_text.count('★')
+                    else:
+                        try:
+                            score = int(float(score_text))
+                        except ValueError:
+                            continue
+                    
+                    score = max(1, min(5, score))
+                    scores[category] = score
+            
+            return scores
+            
+        except Exception as e:
+            logging.error(f"Error extracting scores: {str(e)}")
+            return {}
+
+    def _extract_key_points(self, content: str) -> List[str]:
+        """Extract key points from review content."""
+        key_points = []
+        try:
+            sections = [
+                'CONTENT ANALYSIS',
+                'KEY POINTS',
+                'MAIN POINTS',
+                'SLIDE PURPOSE'
+            ]
+            
+            for section in sections:
+                pattern = fr'{section}:?(.*?)(?=\n\n[A-Z\s]+:|$)'
+                matches = re.search(pattern, content, re.DOTALL | re.IGNORECASE)
+                if matches:
+                    section_text = matches.group(1).strip()
+                    points = re.findall(r'(?:^|\n)\s*[-•*]\s*(.*?)(?=\n|$)', section_text)
+                    if not points:
+                        points = re.findall(r'(?:^|\n)\s*\d+\.\s*(.*?)(?=\n|$)', section_text)
+                    
+                    points = [p.strip() for p in points if p.strip()]
+                    if points:
+                        key_points.extend(points)
+                        break
+            
+            if not key_points:
+                sentences = re.split(r'(?<=[.!?])\s+', content)
+                key_points = [s.strip() for s in sentences if len(s.strip()) > 20 and len(s.strip()) < 200][:3]
+            
+            return key_points[:5]
+            
+        except Exception as e:
+            logging.error(f"Error extracting key points: {str(e)}")
+            return []
+
+    def _extract_recommendations(self, content: str) -> Dict[str, List[str]]:
+        """Extract recommendations from review content."""
+        recommendations = {'required': [], 'optional': []}
+        try:
+            required_patterns = [
+                r'\[REQUIRED\](.*?)(?=\[OPTIONAL\]|\n\n[A-Z]|\Z)',
+                r'Critical improvements needed:(.*?)(?=\n\n[A-Z]|\Z)',
+                r'Essential improvements:(.*?)(?=\n\n[A-Z]|\Z)'
+            ]
+            
+            optional_patterns = [
+                r'\[OPTIONAL\](.*?)(?=\n\n[A-Z]|\Z)',
+                r'Enhancement suggestions?:(.*?)(?=\n\n[A-Z]|\Z)',
+                r'Suggested improvements:(.*?)(?=\n\n[A-Z]|\Z)'
+            ]
+            
+            def extract_points(patterns: List[str], content: str) -> List[str]:
+                for pattern in patterns:
+                    matches = re.search(pattern, content, re.DOTALL | re.IGNORECASE)
+                    if matches:
+                        section_text = matches.group(1).strip()
+                        points = re.findall(r'(?:^|\n)\s*[-•*]\s*(.*?)(?=\n|$)', section_text)
+                        if not points:
+                            points = re.findall(r'(?:^|\n)\s*\d+\.\s*(.*?)(?=\n|$)', section_text)
+                        points = [p.strip() for p in points if p.strip()]
+                        if points:
+                            return points
+                return []
+            
+            recommendations['required'] = extract_points(required_patterns, content)
+            recommendations['optional'] = extract_points(optional_patterns, content)
+            
+            return recommendations
+            
+        except Exception as e:
+            logging.error(f"Error extracting recommendations: {str(e)}")
+            return {'required': [], 'optional': []}
+
+    def _format_review_text(self, raw_content: str) -> str:
+        """Format and clean review text for better presentation."""
+        try:
+            content = re.sub(r'\n{3,}', '\n\n', raw_content)
+            content = re.sub(r'(?m)^([A-Z][A-Z\s]+):', r'\n\1:', content)
+            content = re.sub(r'(?m)^\s*[*•]\s*', '• ', content)
+            content = re.sub(r'(\d)\s*stars?\b', r'\1★', content)
+            content = re.sub(r'(\d)/5', r'\1★', content)
+            
+            def replace_rating(match):
+                num = int(match.group(1))
+                return '★' * num + '☆' * (5 - num)
+            
+            content = re.sub(r'(\d)★', replace_rating, content)
+            
+            return content.strip()
+            
+        except Exception as e:
+            logging.error(f"Error formatting review text: {str(e)}")
+            return raw_content
+
+    def _identify_slide_type(self, content: str) -> str:
+        """Identify the type/purpose of a slide."""
+        if not content:
+            return 'unknown'
+            
+        content_lower = content.lower()
+        slide_types = {
+            'title': ['title', 'agenda', 'outline', 'overview'],
+            'introduction': ['introduction', 'background', 'context'],
+            'methods': ['methods', 'methodology', 'approach'],
+            'results': ['results', 'findings', 'data'],
+            'discussion': ['discussion', 'implications'],
+            'conclusion': ['conclusion', 'summary', 'takeaways'],
+            'references': ['references', 'citations']
+        }
+        
+        for slide_type, keywords in slide_types.items():
+            if any(keyword in content_lower for keyword in keywords):
+                return slide_type
+        return 'content'
+
     def _generate_overall_review(self, slide_reviews: List[Dict[str, Any]], 
                                structure: List[Dict[str, Any]], expertise: str) -> Dict[str, Any]:
         """Generate overall presentation review."""
@@ -758,7 +899,6 @@ Communication Effectiveness: (1-5 stars)"""
             if not slide_reviews:
                 raise ValueError("No slide reviews to analyze")
 
-            # Create a summary of the presentation structure
             structure_summary = "\n".join([
                 f"Slide {s['slide_number']}: {s['content_type'].title()}"
                 for s in structure
@@ -804,15 +944,8 @@ Visual Design: (1-5 stars)
 Technical Quality: (1-5 stars)
 Presentation Impact: (1-5 stars)"""
 
-            # Initialize AI client for overall review
-            client = ChatOpenAI(
-                temperature=0.7,
-                openai_api_key=st.secrets["openai_api_key"],
-                model=self.model
-            )
-            
-            response = client.invoke([HumanMessage(content=prompt)])
-            
+            response = self.client.invoke([HumanMessage(content=prompt)])
+
             if not response or not hasattr(response, 'content'):
                 raise ValueError("Invalid AI response for overall review")
 
@@ -836,8 +969,7 @@ Presentation Impact: (1-5 stars)"""
         try:
             if not sections:
                 raise ValueError("No sections provided for review")
-            
-            # Initialize OpenAI client with provided temperature
+
             self.client = ChatOpenAI(
                 temperature=temperature,
                 openai_api_key=st.secrets["openai_api_key"],
@@ -847,7 +979,6 @@ Presentation Impact: (1-5 stars)"""
             slide_reviews = []
             overall_structure = []
 
-            # Review each slide
             for section in sections:
                 if section.get('type') == 'slide':
                     if not section.get('content'):
@@ -871,7 +1002,6 @@ Presentation Impact: (1-5 stars)"""
             if not slide_reviews:
                 raise ValueError("No valid slides were processed")
 
-            # Generate overall presentation review
             overall_review = self._generate_overall_review(slide_reviews, overall_structure, expertise)
             if not overall_review or not overall_review.get('content'):
                 raise ValueError("Failed to generate overall review")
