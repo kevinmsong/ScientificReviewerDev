@@ -577,36 +577,7 @@ class ReviewManager:
             "Presentation": "gpt-4o"
         }
         self.moderator = ModeratorAgent()
-
-    def _create_previous_context(self, reviews: List[Dict[str, Any]]) -> str:
-        """Create context from previous reviews."""
-        if not reviews:
-            return ""
-            
-        context = "\nPrevious reviews:\n"
-        for review in reviews:
-            if not review.get('error', False):
-                if review.get('is_presentation', False):
-                    # Handle presentation reviews
-                    context += f"\n{review['reviewer']} Overall Assessment:\n{review['content']}\n"
-                    
-                    # Add key points from slide reviews
-                    context += "\nKey points from slides:\n"
-                    for slide_review in review.get('slide_reviews', []):
-                        if not slide_review.get('error'):
-                            context += f"Slide {slide_review['slide_number']}: "
-                            context += f"{'; '.join(slide_review.get('key_points', []))}\n"
-                else:
-                    # Handle regular document reviews
-                    context += f"\n{review['reviewer']}:\n{review['content']}\n"
-        
-        return context
     
-    def _calculate_temperature(self, bias: int) -> float:
-        """Calculate temperature based on reviewer bias."""
-        # Base temperature of 0.7, adjusted by bias
-        return max(0.0, min(1.0, 0.7 + (bias * 0.1)))
-        
     def process_review(self, content: str, sections: List[Dict[str, Any]], config: Dict[str, Any]) -> Dict[str, Any]:
         """Process document review with multiple iterations and moderation."""
         iterations = []
@@ -630,13 +601,12 @@ class ReviewManager:
                         model = self.model_config.get(config['doc_type'], "gpt-4o")
                         
                         if is_presentation:
-                            presentation_reviewer = PresentationReviewer(
-                                model=model,
-                                temperature=temperature  # Pass temperature to PresentationReviewer
-                            )
+                            presentation_reviewer = PresentationReviewer(model=model)  # Remove temperature parameter
+                            # Pass bias to review_presentation instead
                             review_results = presentation_reviewer.review_presentation(
                                 sections=sections,
-                                expertise=reviewer['expertise']
+                                expertise=reviewer['expertise'],
+                                temperature=temperature  # Pass temperature here
                             )
                             
                             review = {
@@ -649,7 +619,7 @@ class ReviewManager:
                             }
                         else:
                             agent = ChatOpenAI(
-                                temperature=temperature,  # Use calculated temperature
+                                temperature=temperature,
                                 openai_api_key=st.secrets["openai_api_key"],
                                 model=model
                             )
@@ -659,8 +629,7 @@ class ReviewManager:
                                 reviewer=reviewer,
                                 config=config,
                                 iteration=iteration + 1,
-                                previous_context=previous_context,
-                                temperature=temperature  # Pass temperature to content processor
+                                previous_context=previous_context
                             )
                         
                         iteration_reviews.append(review)
@@ -696,100 +665,71 @@ class ReviewManager:
             raise
 
 class PresentationReviewer:
-    def __init__(self, model="gpt-4o", temperature=0.7):
+    def __init__(self, model="gpt-4o"):
         self.model = model
-        self.client = ChatOpenAI(
-            temperature=temperature,  # Use provided temperature
-            openai_api_key=st.secrets["openai_api_key"],
-            model=model
-        )
-
-    def _create_review_prompt(self, slide: Dict[str, Any], expertise: str, bias: int) -> str:
-        """Create review prompt with bias guidance."""
-        bias_guidance = ""
-        if bias < 0:
-            bias_guidance = """Focus on identifying areas for improvement and potential issues. 
-Be particularly thorough in highlighting weaknesses and suggesting critical changes."""
-        elif bias > 0:
-            bias_guidance = """Emphasize the strengths and effective elements of the presentation.
-While noting necessary improvements, maintain an encouraging and constructive tone."""
-            
-        return f"""As a {expertise}, review this presentation slide with the following perspective:
-{bias_guidance}
-
-Slide {slide.get('number', 1)} Content:
-{slide['content']}
-
-Provide a structured analysis using these exact sections:
-
-SLIDE PURPOSE:
-- Main message and objective
-- Target audience relevance
-- Position in presentation flow
-
-CONTENT ANALYSIS:
-- Key points and main ideas
-- Technical accuracy
-- Supporting evidence
-- Data presentation (if applicable)
-
-VISUAL DESIGN:
-- Layout effectiveness
-- Visual hierarchy
-- Space utilization
-- Graphics and images effectiveness
-
-COMMUNICATION:
-- Clarity of message
-- Text conciseness
-- Audience engagement
-- Technical language appropriateness
-
-RECOMMENDATIONS:
-[REQUIRED] Critical improvements needed:
-- List specific required changes
-
-[OPTIONAL] Enhancement suggestions:
-- List potential improvements
-
-SCORING:
-Rate each aspect (using ★):
-Content Quality: (1-5 stars)
-Visual Design: (1-5 stars)
-Communication Effectiveness: (1-5 stars)"""
-
-    def _review_slide(self, slide: Dict[str, Any], expertise: str) -> Dict[str, Any]:
-        """Review individual slide with potential bias."""
+    
+    def review_presentation(self, sections: List[Dict[str, Any]], expertise: str, temperature: float = 0.7) -> Dict[str, Any]:
+        """Review a presentation slide by slide with bias-based temperature."""
         try:
-            if not slide.get('content'):
-                raise ValueError("Empty slide content")
+            if not sections:
+                raise ValueError("No sections provided for review")
 
-            # Create prompt with bias guidance
-            prompt = self._create_review_prompt(slide, expertise, bias=0)  # Get bias from config
-            response = self.client.invoke([HumanMessage(content=prompt)])
-            
-            if not response or not hasattr(response, 'content'):
-                raise ValueError("Invalid AI response")
+            # Initialize OpenAI client with provided temperature
+            self.client = ChatOpenAI(
+                temperature=temperature,
+                openai_api_key=st.secrets["openai_api_key"],
+                model=self.model
+            )
 
-            content = response.content
-            
-            review = {
-                'slide_number': slide.get('number', 1),
-                'content': content,
-                'scores': self._extract_scores(content),
-                'key_points': self._extract_key_points(content),
-                'recommendations': self._extract_recommendations(content)
+            slide_reviews = []
+            overall_structure = []
+
+            # Review each slide
+            for section in sections:
+                if section.get('type') == 'slide':
+                    if not section.get('content'):
+                        logging.warning(f"Skipping slide {section.get('number', '?')} - no content")
+                        continue
+
+                    review = self._review_slide(section, expertise)
+                    if not review.get('error'):
+                        formatted_content = self._format_review_text(review['content'])
+                        review['content'] = formatted_content
+                        slide_reviews.append(review)
+                        
+                        overall_structure.append({
+                            'slide_number': section.get('number', len(overall_structure) + 1),
+                            'content_type': self._identify_slide_type(section['content']),
+                            'key_points': review.get('key_points', [])
+                        })
+                    else:
+                        logging.error(f"Error in slide {section.get('number', '?')}: {review.get('error')}")
+
+            if not slide_reviews:
+                raise ValueError("No valid slides were processed")
+
+            # Generate overall presentation review
+            overall_review = self._generate_overall_review(slide_reviews, overall_structure, expertise)
+            if not overall_review or not overall_review.get('content'):
+                raise ValueError("Failed to generate overall review")
+
+            overall_review['content'] = self._format_review_text(overall_review['content'])
+
+            return {
+                'slide_reviews': slide_reviews,
+                'overall_review': overall_review,
+                'structure_analysis': overall_structure
             }
 
-            return review
-
         except Exception as e:
-            error_msg = f"Slide review failed: {str(e)}"
+            error_msg = f"Presentation review failed: {str(e)}"
             logging.error(error_msg)
             return {
-                'slide_number': slide.get('number', 1),
-                'error': error_msg,
-                'content': f"Review failed for slide {slide.get('number', 1)}: {str(e)}"
+                'error': True,
+                'message': error_msg,
+                'slide_reviews': [],
+                'overall_review': {'content': error_msg},
+                'structure_analysis': []
             }
 
 class ReviewManager(ReviewManager):  # Continuing the ReviewManager class
