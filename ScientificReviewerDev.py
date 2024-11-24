@@ -732,150 +732,170 @@ class PresentationReviewer:
                 'structure_analysis': []
             }
 
-class ReviewManager(ReviewManager):  # Continuing the ReviewManager class
-    def _create_review_prompt(self, doc_type: str, expertise: str, scoring_type: str, 
-                            iteration: int, previous_context: str) -> str:
-        """Create review prompt with context from previous iterations."""
-        base_prompt = f"""As a {expertise}, please review this {doc_type} for iteration {iteration}.
-{previous_context}
-
-Please consider previous reviews (if any) and respond to other reviewers' points.
-Use the following structure:"""
-
-        if doc_type.lower() == "grant":
-            return base_prompt + """
-1. RESPONSE TO PREVIOUS REVIEWS (if applicable):
-   - Areas of agreement
-   - Points of disagreement
-   - Additional perspectives
-
-2. SIGNIFICANCE EVALUATION:
-   - Impact potential
-   - Field advancement
-   - Score (1-9 NIH scale)
-
-3. INNOVATION ASSESSMENT:
-   - Novel aspects
-   - Technical advances
-   - Score (1-9 NIH scale)
-
-4. APPROACH ANALYSIS:
-   - Methodology
-   - Feasibility
-   - Score (1-9 NIH scale)
-
-5. OVERALL IMPACT SCORE (1-9 NIH scale)
-   Where: 1 = Exceptional, 9 = Poor
-
-6. DETAILED RECOMMENDATIONS:
-   [REQUIRED] Critical changes needed
-   [OPTIONAL] Suggested improvements"""
+class ReviewManager:
+    def __init__(self):
+        self.model_config = {
+            "Paper": "gpt-4o",
+            "Grant": "gpt-4o",
+            "Poster": "gpt-4o",
+            "Presentation": "gpt-4o"
+        }
+        self.moderator = ModeratorAgent()
+    
+    def _calculate_temperature(self, bias: int) -> float:
+        """Calculate temperature based on reviewer bias while keeping it within valid range."""
+        # Base temperature of 0.7, adjusted by bias but kept within [0.0, 1.0]
+        return max(0.0, min(1.0, 0.7 + (bias * 0.1)))
+    
+    def _create_previous_context(self, reviews: List[Dict[str, Any]]) -> str:
+        """Create context from previous reviews."""
+        if not reviews:
+            return ""
+            
+        context = "\nPrevious reviews:\n"
+        for review in reviews:
+            if not review.get('error', False):
+                if review.get('is_presentation', False):
+                    # Handle presentation reviews
+                    context += f"\n{review['reviewer']} Overall Assessment:\n{review['content']}\n"
+                    
+                    # Add key points from slide reviews
+                    context += "\nKey points from slides:\n"
+                    for slide_review in review.get('slide_reviews', []):
+                        if not slide_review.get('error'):
+                            context += f"Slide {slide_review['slide_number']}: "
+                            context += f"{'; '.join(slide_review.get('key_points', []))}\n"
+                else:
+                    # Handle regular document reviews
+                    context += f"\n{review['reviewer']}:\n{review['content']}\n"
         
-        else:
-            return base_prompt + """
-1. RESPONSE TO PREVIOUS REVIEWS (if applicable):
-   - Areas of agreement
-   - Points of disagreement
-   - Additional perspectives
-
-2. SECTION-BY-SECTION ANALYSIS:
-   For each major section:
-   - Content summary
-   - [REQUIRED] Critical changes
-   - [OPTIONAL] Suggested improvements
-   - Specific line edits
-
-3. SCORING (★☆):
-   Rate each category (1-5 stars):
-   - Scientific Merit
-   - Technical Quality
-   - Presentation
-   - Impact
-
-4. RECOMMENDATIONS:
-   [REQUIRED] Critical changes needed
-   [OPTIONAL] Suggested improvements"""
-
-    def _create_section_review_prompt(self, doc_type: str, expertise: str, scoring_type: str,
-                                    iteration: int, previous_context: str, 
-                                    section_type: str, section_number: int) -> str:
-        """Create review prompt for individual sections."""
-        base_prompt = f"""As a {expertise}, please review this {section_type} {section_number} of the {doc_type}.
-{previous_context}
-
-Please analyze this {section_type} using the following structure:"""
-
-        if doc_type.lower() == "poster":
-            return base_prompt + """
-1. CONTENT ANALYSIS:
-   - Key messages and findings
-   - Scientific accuracy
-   - Data presentation
-   - Visual effectiveness
-
-2. SPECIFIC RECOMMENDATIONS:
-   [REQUIRED] Critical improvements needed
-   [OPTIONAL] Suggested enhancements
-
-3. SECTION SCORE (★☆):
-   Rate this section (1-5 stars):
-   - Content Quality
-   - Visual Design
-   - Communication Effectiveness"""
+        return context
         
-        else:  # PowerPoint slides
-            return base_prompt + """
-1. SLIDE ANALYSIS:
-   - Main points
-   - Clarity and organization
-   - Visual elements
-   - Text content
-
-2. RECOMMENDATIONS:
-   [REQUIRED] Critical improvements
-   [OPTIONAL] Suggested enhancements
-
-3. SLIDE EFFECTIVENESS (★☆):
-   Rate these aspects (1-5 stars):
-   - Content Clarity
-   - Visual Design
-   - Presentation Impact"""
-
-    def _create_compilation_prompt(self, doc_type: str, expertise: str, 
-                                 section_reviews: List[Dict[str, Any]]) -> str:
-        """Create prompt for compiling section reviews."""
-        sections_summary = "\n\n".join([
-            f"Section {review['section_number']}:\n{review['content']}"
-            for review in section_reviews
-        ])
+    def process_review(self, content: str, sections: List[Dict[str, Any]], config: Dict[str, Any]) -> Dict[str, Any]:
+        """Process document review with multiple iterations and moderation."""
+        iterations = []
+        all_reviews = []
         
-        return f"""As a {expertise}, please compile your individual section reviews into a coherent overall review:
-
-Previous section reviews:
-{sections_summary}
-
-Please provide a comprehensive review using this structure:
-
-1. OVERALL ANALYSIS:
-   - Key strengths across all sections
-   - Major areas for improvement
-   - Coherence and flow
-
-2. SECTION-BY-SECTION SUMMARY:
-   - Brief summary of key points for each section
-   - Critical changes needed
-   - Suggested improvements
-
-3. OVERALL SCORING (★☆):
-   Rate each category (1-5 stars):
-   - Content Quality
-   - Visual Design
-   - Communication Effectiveness
-   - Overall Impact
-
-4. FINAL RECOMMENDATIONS:
-   [REQUIRED] Critical changes needed
-   [OPTIONAL] Suggested improvements"""
+        try:
+            # Check if it's a PowerPoint file
+            is_presentation = any(section.get('type') == 'slide' for section in sections)
+            if is_presentation:
+                config['doc_type'] = "Presentation"
+            
+            # Calculate temperature once based on global bias setting
+            temperature = self._calculate_temperature(config.get('bias', 0))
+            
+            for iteration in range(config['iterations']):
+                iteration_reviews = []
+                previous_context = self._create_previous_context(all_reviews)
+                
+                for reviewer in config['reviewers']:
+                    try:
+                        model = self.model_config.get(config['doc_type'], "gpt-4o")
+                        
+                        if is_presentation:
+                            presentation_reviewer = PresentationReviewer(model=model)  # Remove temperature parameter
+                            # Pass bias to review_presentation instead
+                            review_results = presentation_reviewer.review_presentation(
+                                sections=sections,
+                                expertise=reviewer['expertise'],
+                                temperature=temperature  # Pass temperature here
+                            )
+                            
+                            if review_results.get('error'):
+                                raise ValueError(review_results.get('message', 'Unknown error in presentation review'))
+                            
+                            review = {
+                                'reviewer': reviewer['expertise'],
+                                'content': review_results['overall_review']['content'],
+                                'slide_reviews': review_results['slide_reviews'],
+                                'structure_analysis': review_results['structure_analysis'],
+                                'timestamp': datetime.now().isoformat(),
+                                'is_presentation': True
+                            }
+                        else:
+                            agent = ChatOpenAI(
+                                temperature=temperature,
+                                openai_api_key=st.secrets["openai_api_key"],
+                                model=model
+                            )
+                            review = self._process_full_content(
+                                agent=agent,
+                                content=content,
+                                reviewer=reviewer,
+                                config=config,
+                                iteration=iteration + 1,
+                                previous_context=previous_context
+                            )
+                        
+                        iteration_reviews.append(review)
+                        all_reviews.append(review)
+                        
+                    except Exception as e:
+                        error_msg = f"Error in review by {reviewer['expertise']}: {str(e)}"
+                        logging.error(error_msg)
+                        iteration_reviews.append({
+                            'reviewer': reviewer['expertise'],
+                            'content': f"Review failed: {str(e)}",
+                            'timestamp': datetime.now().isoformat(),
+                            'error': True
+                        })
+                
+                iterations.append({
+                    'iteration_number': iteration + 1,
+                    'reviews': iteration_reviews
+                })
+            
+            # Generate moderator summary if we have valid reviews
+            if any(not review.get('error', False) for reviews in iterations for review in reviews['reviews']):
+                moderator_summary = self.moderator.summarize_discussion(iterations)
+            else:
+                moderator_summary = "No valid reviews to summarize"
+            
+            return {
+                'iterations': iterations,
+                'moderator_summary': moderator_summary,
+                'config': config,
+                'timestamp': datetime.now().isoformat(),
+                'doc_type': config['doc_type'],
+                'is_presentation': is_presentation
+            }
+            
+        except Exception as e:
+            error_msg = f"Error in review process: {str(e)}"
+            logging.error(error_msg)
+            raise
+            
+    def _process_full_content(self, agent, content: str, reviewer: Dict[str, str],
+                            config: Dict[str, Any], iteration: int,
+                            previous_context: str) -> Dict[str, Any]:
+        """Process full content for papers and grants."""
+        try:
+            if not content or not isinstance(content, str):
+                raise ValueError("Invalid content provided")
+            
+            prompt = self._create_review_prompt(
+                doc_type=config['doc_type'],
+                expertise=reviewer['expertise'],
+                scoring_type=config['scoring'],
+                iteration=iteration,
+                previous_context=previous_context
+            )
+            
+            response = agent.invoke([HumanMessage(content=f"{prompt}\n\nContent:\n{content}")])
+            
+            if not response or not hasattr(response, 'content'):
+                raise ValueError("Invalid response from AI model")
+                
+            return {
+                'reviewer': reviewer['expertise'],
+                'content': response.content,
+                'timestamp': datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            logging.error(f"Content processing error: {str(e)}")
+            raise ValueError(f"Content processing failed: {str(e)}")
 
 class PresentationReviewer:
     """Specialized reviewer for PowerPoint presentations."""
