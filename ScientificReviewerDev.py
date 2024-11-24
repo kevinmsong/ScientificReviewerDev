@@ -1130,7 +1130,7 @@ def main():
                 content, sections = extract_document_content(uploaded_file, file_type)
             
             # Process review
-            if st.button("Generate Review", type="primary"):if st.button("Generate Review", type="primary"):
+            if st.button("Generate Review", type="primary"):
                 config = {
                     "doc_type": doc_type,
                     "venue": venue,
