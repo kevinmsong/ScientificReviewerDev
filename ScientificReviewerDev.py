@@ -564,22 +564,44 @@ Format your response using these exact sections and maintain a balanced, objecti
 
 class ReviewManager:
     def __init__(self):
-        # Update model configuration to use gpt-4o
         self.model_config = {
             "Paper": "gpt-4o",
             "Grant": "gpt-4o",
             "Poster": "gpt-4o",
-            "Presentation": "gpt-4o"  # Ensure consistent model name for presentations
+            "Presentation": "gpt-4o"
         }
         self.moderator = ModeratorAgent()
     
+    def _create_previous_context(self, reviews: List[Dict[str, Any]]) -> str:
+        """Create context from previous reviews."""
+        if not reviews:
+            return ""
+            
+        context = "\nPrevious reviews:\n"
+        for review in reviews:
+            if not review.get('error', False):
+                if review.get('is_presentation', False):
+                    # Handle presentation reviews differently
+                    context += f"\n{review['reviewer']} Overall Assessment:\n{review['content']}\n"
+                    
+                    # Add key points from slide reviews
+                    context += "\nKey points from slides:\n"
+                    for slide_review in review.get('slide_reviews', []):
+                        if not slide_review.get('error'):
+                            context += f"Slide {slide_review['slide_number']}: "
+                            context += f"{'; '.join(slide_review.get('key_points', []))}\n"
+                else:
+                    # Handle regular document reviews
+                    context += f"\n{review['reviewer']}:\n{review['content']}\n"
+        
+        return context
+
     def process_review(self, content: str, sections: List[Dict[str, Any]], config: Dict[str, Any]) -> Dict[str, Any]:
         """Process document review with multiple iterations and moderation."""
         iterations = []
         all_reviews = []
         
         try:
-            # Check if it's a PowerPoint file
             is_presentation = any(section.get('type') == 'slide' for section in sections)
             if is_presentation:
                 config['doc_type'] = "Presentation"
@@ -591,15 +613,17 @@ class ReviewManager:
                 for reviewer in config['reviewers']:
                     try:
                         temperature = self._calculate_temperature(config.get('bias', 0))
-                        # Get correct model name with fallback
                         model = self.model_config.get(config['doc_type'], "gpt-4o")
                         
                         if is_presentation:
-                            presentation_reviewer = PresentationReviewer(model=model)  # Pass correct model name
+                            presentation_reviewer = PresentationReviewer(model=model)
                             review_results = presentation_reviewer.review_presentation(
                                 sections=sections,
                                 expertise=reviewer['expertise']
                             )
+                            
+                            if not review_results.get('overall_review', {}).get('content'):
+                                raise ValueError("Missing review content from presentation reviewer")
                             
                             review = {
                                 'reviewer': reviewer['expertise'],
@@ -628,7 +652,8 @@ class ReviewManager:
                         all_reviews.append(review)
                         
                     except Exception as e:
-                        logging.error(f"Error in review by {reviewer['expertise']}: {str(e)}")
+                        error_msg = f"Error in review by {reviewer['expertise']}: {str(e)}"
+                        logging.error(error_msg)
                         iteration_reviews.append({
                             'reviewer': reviewer['expertise'],
                             'content': f"Review failed: {str(e)}",
@@ -641,7 +666,11 @@ class ReviewManager:
                     'reviews': iteration_reviews
                 })
             
-            moderator_summary = self.moderator.summarize_discussion(iterations)
+            # Generate moderator summary if we have valid reviews
+            if any(not review.get('error', False) for reviews in iterations for review in reviews['reviews']):
+                moderator_summary = self.moderator.summarize_discussion(iterations)
+            else:
+                moderator_summary = "No valid reviews to summarize"
             
             return {
                 'iterations': iterations,
@@ -653,8 +682,14 @@ class ReviewManager:
             }
             
         except Exception as e:
-            logging.error(f"Error in review process: {str(e)}")
-            raise
+            error_msg = f"Error in review process: {str(e)}"
+            logging.error(error_msg)
+            raise ValueError(error_msg)
+            
+    def _calculate_temperature(self, bias: int) -> float:
+        """Calculate temperature based on reviewer bias while keeping it within valid range."""
+        # Base temperature of 0.7, adjusted by bias but kept within [0.0, 1.0]
+        return max(0.0, min(1.0, 0.7 + (bias * 0.1)))
 
 class ReviewManager(ReviewManager):  # Continuing the ReviewManager class
     def _create_review_prompt(self, doc_type: str, expertise: str, scoring_type: str, 
