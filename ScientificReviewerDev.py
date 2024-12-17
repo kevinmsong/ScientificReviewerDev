@@ -994,9 +994,90 @@ class ReviewManager:
             "Paper": "gpt-4o",
             "Grant": "gpt-4o",
             "Poster": "gpt-4o",
-            "Presentation": "gpt-4o"
+            "Presentation": "gpt-4o""Presentation": "gpt-4o""Presentation": "gpt-4o""Presentation": "gpt-4o"
         }
         self.moderator = ModeratorAgent()
+    
+    def _process_full_content(self, agent, content: str, reviewer: Dict[str, Any], config: Dict[str, Any], iteration: int, previous_context: str) -> Dict[str, Any]:
+        """Process a full document review with structured sections."""
+        try:
+            scoring_guide = (
+                "Rate each section 1-5 stars (★)" if config['scoring'] == 'stars'
+                else "Rate each section on NIH scale (1-9, where 1 is exceptional and 9 is poor)"
+            )
+            
+            prompt = f"""As a {reviewer['expertise']}, review this {config['doc_type'].lower()} for {config['venue']}.
+
+    Iteration: {iteration}
+    {previous_context}
+
+    Document Content:
+    {content}
+
+    Provide a detailed review using these exact sections:
+
+    RESPONSE TO PREVIOUS REVIEWS:
+    Only address previous reviews if this is a later iteration.
+
+    SECTION-BY-SECTION ANALYSIS:
+    For each major section:
+    - Content Summary
+    - Critical Changes
+    - Suggested Improvements
+    - Specific Line Edits
+
+    SIGNIFICANCE EVALUATION:
+    - Scientific impact
+    - Clinical/translational relevance
+    - Innovation potential
+    - Contribution to field
+
+    INNOVATION ASSESSMENT:
+    - Novel concepts/approaches
+    - Technical innovations
+    - Methodological advances
+    - Potential impact
+
+    APPROACH ANALYSIS:
+    - Technical feasibility
+    - Methodology appropriateness
+    - Statistical considerations
+    - Potential pitfalls and alternatives
+
+    SCORING:
+    {scoring_guide}
+    - Significance: [score]
+    - Innovation: [score]
+    - Approach: [score]
+    - Overall Impact: [score]
+
+    RECOMMENDATIONS:
+    Critical changes needed:
+    - List required revisions
+
+    Suggested improvements:
+    - List optional enhancements"""
+
+            response = agent.invoke([HumanMessage(content=prompt)])
+            
+            if not response or not hasattr(response, 'content'):
+                raise ValueError("Invalid AI response")
+
+            return {
+                'reviewer': reviewer['expertise'],
+                'content': response.content,
+                'timestamp': datetime.now().isoformat()
+            }
+
+        except Exception as e:
+            error_msg = f"Review generation failed: {str(e)}"
+            logging.error(error_msg)
+            return {
+                'reviewer': reviewer['expertise'],
+                'content': error_msg,
+                'timestamp': datetime.now().isoformat(),
+                'error': True
+            }
 
     def _calculate_temperature(self, bias: int) -> float:
         """Calculate temperature based on reviewer bias."""
