@@ -268,57 +268,55 @@ def extract_pptx_content(pptx_file) -> tuple[str, List[Dict[str, Any]]]:
 
 def parse_review_sections(content: str) -> Dict[str, str]:
     """
-    Enhanced parsing of review content with more flexible section extraction.
+    Fallback parsing method with extensive logging.
     """
-    sections = {}
+    st.write("Parsing Review Sections")
+    st.write("Full Content:")
+    st.write(content)
     
-    # Define section markers with more flexible matching
+    # Basic section parsing with extensive logging
+    sections = {}
     section_markers = [
-        ('response', r'RESPONSE\s*TO\s*PREVIOUS\s*REVIEWS?', ['next_section', 'SIGNIFICANCE', 'INNOVATION', 'APPROACH']),
-        ('significance', r'SIGNIFICANCE\s*EVALUATION', ['INNOVATION', 'APPROACH', 'SCORING']),
-        ('innovation', r'INNOVATION\s*ASSESSMENT', ['APPROACH', 'SIGNIFICANCE', 'SCORING']),
-        ('approach', r'APPROACH\s*ANALYSIS', ['SCORING', 'SIGNIFICANCE', 'INNOVATION']),
-        ('scoring', r'SCORING', ['RECOMMENDATIONS']),
-        ('recommendations', r'RECOMMENDATIONS', [])
+        'RESPONSE TO PREVIOUS REVIEWS',
+        'SIGNIFICANCE EVALUATION',
+        'INNOVATION ASSESSMENT', 
+        'APPROACH ANALYSIS',
+        'SCORING',
+        'RECOMMENDATIONS'
     ]
     
-    # Convert content to a single string and normalize newlines
-    if not isinstance(content, str):
-        content = str(content)
-    content = content.replace('\r\n', '\n')
-    
-    for key, marker_pattern, next_markers in section_markers:
-        try:
-            # Find the start of the section
-            marker_match = re.search(marker_pattern, content, re.IGNORECASE | re.MULTILINE)
-            if not marker_match:
-                continue
-            
-            start_pos = marker_match.end()
-            
-            # Find the end of the section
-            end_pos = len(content)
-            for next_marker in next_markers:
-                next_match = re.search(next_marker, content[start_pos:], re.IGNORECASE | re.MULTILINE)
-                if next_match:
-                    end_pos = start_pos + next_match.start()
-                    break
-            
-            # Extract section content
-            section_content = content[start_pos:end_pos].strip()
-            
-            # Basic cleaning
-            section_content = re.sub(r'\n{3,}', '\n\n', section_content)
-            section_content = re.sub(r'^\s*\d+\.\s*', '', section_content, flags=re.MULTILINE)
-            
-            if section_content:
-                sections[key] = section_content
+    try:
+        for marker in section_markers:
+            # Case-insensitive search
+            match = re.search(marker, content, re.IGNORECASE)
+            if match:
+                start = match.start()
+                # Find next marker or end of content
+                next_start = len(content)
+                for next_marker in section_markers:
+                    if next_marker != marker:
+                        next_match = re.search(next_marker, content[start+1:], re.IGNORECASE)
+                        if next_match:
+                            next_start = start + 1 + next_match.start()
+                            break
+                
+                # Extract section content
+                section_content = content[start:next_start].strip()
+                sections[marker.lower().replace(' ', '_')] = section_content
+                
+                st.write(f"Found section: {marker}")
+                st.write(section_content)
         
-        except Exception as e:
-            logging.error(f"Error parsing {key} section: {str(e)}")
+        st.write("Parsed Sections:")
+        st.json(sections)
+        
+        return sections
     
-    return sections
-
+    except Exception as e:
+        st.error(f"Error parsing sections: {str(e)}")
+        logging.error(f"Section parsing error: {str(e)}")
+        return {}
+    
 def parse_moderator_sections(content: str) -> Dict[str, str]:
     """Parse moderator summary into structured sections."""
     sections = {}
@@ -588,79 +586,82 @@ def parse_nih_review_sections(content: str) -> Dict[str, str]:
 
 def display_review_results(results: Dict[str, Any]):
     """
-    Comprehensive review results display with enhanced error handling.
+    Comprehensive review results display with extensive debugging.
     """
+    # Emergency logging and display
+    st.write("Raw Results Structure:")
+    st.json(results)
+
     try:
-        # Validate results
-        if not results or 'iterations' not in results:
-            st.warning("No review results available.")
+        # Explicit validation and logging
+        if not results:
+            st.error("Results are empty")
             return
         
-        # Determine review type
-        is_nih = (
-            results.get('config', {}).get('doc_type') == "Grant" and 
-            results.get('config', {}).get('scoring') == "nih"
-        )
+        if 'iterations' not in results:
+            st.error("No 'iterations' key in results")
+            return
         
-        # Create tabs for iterations
-        tab_titles = [f"Iteration {i+1}" for i in range(len(results['iterations']))]
+        iterations = results.get('iterations', [])
+        st.write(f"Number of Iterations: {len(iterations)}")
+        
+        # Create tabs with backup display
+        tab_titles = [f"Iteration {i+1}" for i in range(len(iterations))]
         tab_titles.append("Final Analysis")
         tabs = st.tabs(tab_titles)
         
-        # Display each iteration
-        for idx, (tab, iteration) in enumerate(zip(tabs[:-1], results['iterations'])):
+        # Detailed iteration processing
+        for idx, (tab, iteration) in enumerate(zip(tabs[:-1], iterations)):
             with tab:
-                st.markdown(f"## Iteration {idx + 1} Reviews")
+                st.markdown(f"## Iteration {idx + 1}")
                 
-                # Check if reviews exist
-                if not iteration.get('reviews'):
-                    st.warning("No reviews found for this iteration.")
+                # Explicit reviews display
+                reviews = iteration.get('reviews', [])
+                st.write(f"Number of Reviews in Iteration {idx + 1}: {len(reviews)}")
+                
+                if not reviews:
+                    st.warning("No reviews found in this iteration")
                     continue
                 
-                # Process each review
-                for review in iteration['reviews']:
-                    # Skip error reviews
+                for review_idx, review in enumerate(reviews, 1):
+                    st.markdown(f"### Review {review_idx}")
+                    
+                    # Display raw review content
+                    st.write("Raw Review Content:")
+                    st.json(review)
+                    
+                    # Error handling
                     if review.get('error'):
-                        st.error(f"Review error: {review.get('content', 'Unknown error')}")
+                        st.error(f"Review Error: {review.get('content', 'Unknown error')}")
                         continue
                     
-                    # Display reviewer and timestamp
-                    st.markdown(f"### 📝 Review by {review.get('reviewer', 'Unknown')}")
+                    # Basic review details
+                    st.markdown(f"**Reviewer:** {review.get('reviewer', 'Unknown')}")
+                    st.markdown(f"**Timestamp:** {review.get('timestamp', 'Unknown time')}")
                     
-                    # Parse and display review sections
-                    try:
-                        # Check if review content exists
-                        if not review.get('content'):
-                            st.warning("Empty review content.")
-                            continue
-                        
-                        # Parse review sections
-                        if is_nih:
-                            sections = parse_nih_review_sections(review['content'])
-                        else:
-                            sections = parse_review_sections(review['content'])
-                        
-                        # Display parsed sections
-                        display_review_sections(sections, is_nih)
-                    
-                    except Exception as e:
-                        st.error(f"Error parsing review: {str(e)}")
-                    
-                    # Display timestamp
-                    st.markdown(f"*Reviewed at: {review.get('timestamp', 'Unknown time')}*")
-                    st.markdown("---")
+                    # Content display
+                    content = review.get('content', 'No content available')
+                    st.markdown("**Review Content:**")
+                    st.write(content)
+                
+                # Dialogue display
+                dialogues = iteration.get('dialogue', [])
+                st.write(f"Number of Dialogues: {len(dialogues)}")
+                
+                for dialogue_idx, dialogue in enumerate(dialogues, 1):
+                    st.markdown(f"### Dialogue {dialogue_idx}")
+                    st.json(dialogue)
         
         # Final analysis tab
         with tabs[-1]:
             st.markdown("## Final Analysis")
-            if results.get('moderator_summary'):
-                display_moderator_sections(results['moderator_summary'])
-            else:
-                st.warning("No final analysis available.")
+            moderator_summary = results.get('moderator_summary', 'No summary available')
+            st.write(moderator_summary)
     
     except Exception as e:
-        st.error(f"Error displaying review results: {str(e)}")
+        st.error(f"Critical error in display: {str(e)}")
         logging.error(f"Review display error: {str(e)}")
+        logging.exception("Full error details:")
 
 class ModeratorAgent:
     def __init__(self, model="gpt-4o"):
@@ -1715,7 +1716,7 @@ def main():
                - Impact on concepts/methods/technologies
             
             2. **Innovation**
-               - Challenge to research paradigms# Pre-configured expertise options
+               - Challenge to research paradigms
                - Novel concepts/approaches/methods
                - State-of-the-art advancement
             
