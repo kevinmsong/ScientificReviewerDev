@@ -194,6 +194,20 @@ def extract_pdf_content(pdf_file) -> tuple[str, List[Dict[str, Any]]]:
     except Exception as e:
         raise Exception(f"Error processing PDF: {str(e)}")
 
+def clean_text_formatting(text: str) -> str:
+    """Remove unnecessary formatting characters and clean up text."""
+    # Remove asterisks not part of bullet points
+    text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)
+    # Remove numbered bullets with asterisks
+    text = re.sub(r'\d+\.\s*\*\*', '', text)
+    # Remove lone asterisks
+    text = re.sub(r'^\*\s*', '• ', text, flags=re.MULTILINE)
+    # Clean up multiple newlines
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    # Clean up bullet points
+    text = re.sub(r'•\s*\*\*([^*]+)\*\*:', r'• \1:', text)
+    return text.strip()
+
 def extract_pptx_content(pptx_file) -> tuple[str, List[Dict[str, Any]]]:
     """Extract content from PowerPoint with slide preservation."""
     try:
@@ -429,24 +443,41 @@ def display_review_sections(sections: Dict[str, str], is_nih: bool = False):
                         st.markdown(paragraph.strip())
                 st.markdown("---")
 
+def format_analysis_section(title: str, content: str) -> str:
+    """Format a section of the analysis with clean styling."""
+    formatted_content = clean_text_formatting(content)
+    
+    # Split into bullet points if content contains them
+    if '• ' in formatted_content:
+        points = formatted_content.split('• ')
+        formatted_points = []
+        for point in points:
+            if point.strip():
+                if ':' in point:
+                    label, detail = point.split(':', 1)
+                    formatted_points.append(f"• {label.strip()}:{detail}")
+                else:
+                    formatted_points.append(f"• {point.strip()}")
+        formatted_content = '\n'.join(formatted_points)
+    
+    return f"{title}\n{formatted_content}\n"
+
 def format_dialogue(dialogue_content: str) -> str:
-    """Format reviewer dialogue with clear speaker labels and structure."""
-    formatted = ""
+    """Format reviewer dialogue with clean styling."""
     lines = dialogue_content.split('\n')
-    current_speaker = None
+    formatted_lines = []
     
     for line in lines:
         if ':' in line and not line.strip().endswith(':'):
             speaker, message = line.split(':', 1)
             if re.match(r'^[A-Za-z\s]+$', speaker.strip()):
-                current_speaker = speaker.strip()
-                formatted += f"**{current_speaker}**: {message.strip()}\n\n"
+                formatted_lines.append(f"{speaker.strip()}: {message.strip()}")
             else:
-                formatted += f"{line.strip()}\n\n"
-        else:
-            formatted += f"{line.strip()}\n\n"
+                formatted_lines.append(line.strip())
+        elif line.strip():
+            formatted_lines.append(line.strip())
     
-    return formatted.strip()
+    return '\n\n'.join(formatted_lines)
 
 def display_moderator_sections(content: str):
     """Display moderator summary sections with consistent formatting."""
@@ -544,14 +575,13 @@ def parse_nih_review_sections(content: str) -> Dict[str, str]:
     return sections
 
 def display_review_results(results: Dict[str, Any]):
-    """Display review results with enhanced formatting."""
+    """Display review results with enhanced formatting and organization."""
     st.markdown("## Review Results")
     
     if not results.get('iterations'):
         st.warning("No review results available.")
         return
     
-    # Create tabs only if there are actual iterations
     valid_iterations = [i for i in results['iterations'] if i['reviews']]
     if not valid_iterations:
         st.warning("No valid reviews to display.")
@@ -559,10 +589,14 @@ def display_review_results(results: Dict[str, Any]):
     
     is_nih = results.get('config', {}).get('doc_type') == "Grant" and \
              results.get('config', {}).get('scoring') == "nih"
-        
-    tabs = st.tabs([f"Iteration {i+1}" for i in range(len(valid_iterations))])
     
-    for idx, (tab, iteration) in enumerate(zip(tabs, valid_iterations)):
+    # Create tabs for iterations and final analysis
+    tab_titles = [f"Iteration {i+1}" for i in range(len(valid_iterations))]
+    tab_titles.append("Final Analysis")
+    tabs = st.tabs(tab_titles)
+    
+    # Display iterations
+    for idx, (tab, iteration) in enumerate(zip(tabs[:-1], valid_iterations)):
         with tab:
             # Display initial reviews
             st.markdown("### Initial Reviews")
@@ -572,12 +606,12 @@ def display_review_results(results: Dict[str, Any]):
                         st.error(review['content'])
                     elif review.get('is_presentation', False):
                         # Handle presentation reviews
-                        st.markdown("### 📊 Overall Presentation Analysis")
-                        st.markdown(review['content'])
+                        st.markdown("📊 Overall Presentation Analysis")
+                        st.markdown(clean_text_formatting(review['content']))
                         st.markdown("---")
                         
                         if review.get('slide_reviews'):
-                            st.markdown("### 🎯 Slide-by-Slide Review")
+                            st.markdown("🎯 Slide-by-Slide Review")
                             slide_tabs = st.tabs([f"Slide {sr['slide_number']}" 
                                                for sr in review['slide_reviews'] 
                                                if not sr.get('error')])
@@ -588,7 +622,7 @@ def display_review_results(results: Dict[str, Any]):
                                         sections = parse_slide_review(slide_review['content'])
                                         for section_title, content in sections.items():
                                             st.markdown(f"#### {section_title}")
-                                            st.markdown(content)
+                                            st.markdown(clean_text_formatting(content))
                                             st.markdown("---")
                     else:
                         # Handle regular document reviews
@@ -609,19 +643,38 @@ def display_review_results(results: Dict[str, Any]):
                             st.error(dialogue['content'])
                         else:
                             formatted_dialogue = format_dialogue(dialogue['content'])
-                            st.markdown(formatted_dialogue)
+                            st.markdown(clean_text_formatting(formatted_dialogue))
                         st.markdown(f"*Discussion at: {dialogue['timestamp']}*")
                 st.markdown("---")
     
-    # Display moderator summary
-    if results.get('moderator_summary'):
-        st.markdown("## 🎯 Final Analysis")
-        if is_nih:
-            st.markdown("### NIH Review Summary")
-        display_moderator_sections(results['moderator_summary'])
+    # Display final analysis in its own tab
+    with tabs[-1]:
+        if results.get('moderator_summary'):
+            if is_nih:
+                st.markdown("### NIH Review Summary")
+            
+            # Parse and display moderator sections
+            sections = parse_moderator_sections(results['moderator_summary'])
+            
+            # Display each section with clean formatting
+            section_titles = {
+                'agreement': '🤝 Points of Agreement',
+                'contention': '⚖️ Points of Contention',
+                'evolution': '📈 Discussion Evolution',
+                'synthesis': '🎯 Final Synthesis'
+            }
+            
+            for key, title in section_titles.items():
+                if key in sections:
+                    st.markdown(f"### {title}")
+                    formatted_content = clean_text_formatting(sections[key])
+                    st.markdown(formatted_content)
+                    st.markdown("---")
+        else:
+            st.warning("No final analysis available.")
 
 class ModeratorAgent:
-    def __init__(self, model="gpt-4o"):  # Update default model
+    def __init__(self, model="gpt-4o"):
         self.model = ChatOpenAI(
             temperature=0.0,
             openai_api_key=st.secrets["openai_api_key"],
@@ -629,42 +682,53 @@ class ModeratorAgent:
         )
     
     def summarize_discussion(self, iterations: List[Dict[str, Any]]) -> str:
-        """Analyze the evolution of discussion across iterations."""
-        discussion_summary = "Discussion Evolution Summary:\n\n"
-        for iteration in iterations:
-            discussion_summary += f"Iteration {iteration['iteration_number']} reviews:\n"
-            for review in iteration['reviews']:
-                if not review.get('error', False):  # Only include successful reviews
-                    discussion_summary += f"- {review['reviewer']}: {review['content']}\n\n"
+        """Analyze the complete discussion history across all iterations."""
+        discussion_summary = "Complete Discussion History:\n\n"
         
-        moderator_prompt = f"""As a moderator, analyze how the scientific discussion evolved across these iterations:
+        # Build comprehensive discussion history
+        for idx, iteration in enumerate(iterations, 1):
+            discussion_summary += f"\nIteration {idx}:\n"
+            
+            # Add reviews
+            for review in iteration['reviews']:
+                if not review.get('error', False):
+                    discussion_summary += f"\n{review['reviewer']}:\n{review['content']}\n"
+            
+            # Add dialogue and key points
+            if iteration.get('dialogue'):
+                discussion_summary += "\nDiscussion Summary:\n"
+                discussion_summary += iteration['dialogue'][0].get('key_points', '') + "\n"
+        
+        moderator_prompt = f"""As a moderator, analyze this complete discussion history across all iterations:
 
 {discussion_summary}
 
-Please provide a comprehensive analysis using the following structure:
+Provide a comprehensive final analysis that:
 
 1. KEY POINTS OF AGREEMENT:
-   - Areas where reviewers reached consensus
-   - Shared concerns or praise
-   - Common recommendations
+   - Track how consensus was built across iterations
+   - Identify major agreements and their evolution
+   - Note when key agreements were reached
 
 2. POINTS OF CONTENTION:
-   - Areas of disagreement
-   - Differing perspectives
-   - Varying interpretations
+   - Analyze unresolved disagreements
+   - Examine how disagreements evolved or were resolved
+   - Identify root causes of persistent disagreements
 
 3. DISCUSSION EVOLUTION:
-   - How viewpoints changed across iterations
-   - How reviewers responded to each other
-   - Development of key arguments
+   - Track how viewpoints changed across iterations
+   - Note key turning points in the discussion
+   - Identify what influenced opinion changes
+   - Analyze the effectiveness of the dialogue
 
 4. FINAL SYNTHESIS:
-   - Overall consensus
-   - Key recommendations
-   - Final decision recommendation
-   - Critical next steps
+   - Provide overall consensus view
+   - Summarize critical recommendations
+   - Identify clear next steps
+   - Note any remaining uncertainties
+   - Suggest future directions
 
-Format your response using these exact sections and maintain a balanced, objective perspective."""
+Format your response using these exact sections and maintain an objective, analytical perspective that considers the complete discussion history."""
 
         try:
             response = self.model.invoke([HumanMessage(content=moderator_prompt)])
@@ -672,6 +736,107 @@ Format your response using these exact sections and maintain a balanced, objecti
         except Exception as e:
             logging.error(f"Error in moderation: {e}")
             return f"Error generating moderation summary: {str(e)}"
+
+def process_review(self, content: str, sections: List[Dict[str, Any]], config: Dict[str, Any]) -> Dict[str, Any]:
+    """Process document review with iterative discussions and comprehensive final analysis."""
+    iterations = []
+    previous_iterations = []
+    
+    try:
+        is_presentation = any(section.get('type') == 'slide' for section in sections)
+        if is_presentation:
+            config['doc_type'] = "Presentation"
+        
+        temperature = self._calculate_temperature(config.get('bias', 0))
+        
+        for iteration in range(config['iterations']):
+            iteration_reviews = []
+            previous_context = self._create_previous_context(iterations)
+            
+            # Generate reviews
+            for reviewer in config['reviewers']:
+                try:
+                    model = self.model_config.get(config['doc_type'], "gpt-4o")
+                    
+                    if is_presentation:
+                        presentation_reviewer = PresentationReviewer(model=model)
+                        review_results = presentation_reviewer.review_presentation(
+                            sections=sections,
+                            expertise=reviewer['expertise'],
+                            temperature=temperature
+                        )
+                        
+                        review = {
+                            'reviewer': reviewer['expertise'],
+                            'content': review_results['overall_review']['content'],
+                            'slide_reviews': review_results['slide_reviews'],
+                            'structure_analysis': review_results['structure_analysis'],
+                            'timestamp': datetime.now().isoformat(),
+                            'is_presentation': True
+                        }
+                    else:
+                        agent = ChatOpenAI(
+                            temperature=temperature,
+                            openai_api_key=st.secrets["openai_api_key"],
+                            model=model
+                        )
+                        review = self._process_full_content(
+                            agent=agent,
+                            content=content,
+                            reviewer=reviewer,
+                            config=config,
+                            iteration=iteration + 1,
+                            previous_context=previous_context
+                        )
+                    
+                    iteration_reviews.append(review)
+                    
+                except Exception as e:
+                    logging.error(f"Error in review by {reviewer['expertise']}: {str(e)}")
+                    iteration_reviews.append({
+                        'reviewer': reviewer['expertise'],
+                        'content': f"Review failed: {str(e)}",
+                        'timestamp': datetime.now().isoformat(),
+                        'error': True
+                    })
+            
+            # Generate reviewer dialogue that builds on previous discussions
+            if not is_presentation:
+                dialogue = self._generate_reviewer_dialogue(
+                    iteration_reviews,
+                    previous_iterations,
+                    config
+                )
+                
+                current_iteration = {
+                    'iteration_number': iteration + 1,
+                    'reviews': iteration_reviews,
+                    'dialogue': [dialogue]
+                }
+                
+                iterations.append(current_iteration)
+                previous_iterations.append(current_iteration)
+            else:
+                iterations.append({
+                    'iteration_number': iteration + 1,
+                    'reviews': iteration_reviews
+                })
+        
+        # Generate final analysis considering all iterations
+        moderator_summary = self.moderator.summarize_discussion(iterations)
+        
+        return {
+            'iterations': iterations,
+            'moderator_summary': moderator_summary,
+            'config': config,
+            'timestamp': datetime.now().isoformat(),
+            'doc_type': config['doc_type'],
+            'is_presentation': is_presentation
+        }
+        
+    except Exception as e:
+        logging.error(f"Error in review process: {str(e)}")
+        raise
 
 class PresentationReviewer:
     def __init__(self, model="gpt-4o"):
@@ -1102,73 +1267,90 @@ class ReviewManager:
         }
         self.moderator = ModeratorAgent()
 
-    def _generate_reviewer_dialogue(self, reviews: List[Dict[str, Any]], config: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Generate a dialogue between reviewers discussing their different viewpoints."""
+    def _generate_reviewer_dialogue(self, reviews: List[Dict[str, Any]], previous_iterations: List[Dict[str, Any]], config: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate a dialogue between reviewers that builds on previous discussions."""
         try:
-            dialogue_messages = []
-            reviewers = [review['reviewer'] for review in reviews if not review.get('error', False)]
+            current_iteration = len(previous_iterations) + 1
+            dialogue_context = ""
             
-            # Create initial dialogue prompt
-            dialogue_prompt = f"""Based on the following reviews of this {config['doc_type'].lower()}, generate a realistic dialogue between the reviewers discussing their viewpoints:
+            # Build context from previous iterations
+            if previous_iterations:
+                dialogue_context = "Previous Discussions:\n\n"
+                for idx, iteration in enumerate(previous_iterations, 1):
+                    dialogue_context += f"Iteration {idx} Key Points:\n"
+                    if iteration.get('dialogue'):
+                        # Extract key agreements and disagreements from previous dialogue
+                        for dialogue in iteration['dialogue']:
+                            dialogue_context += f"{dialogue.get('key_points', '')}\n"
+                    dialogue_context += "\n"
 
-    Reviews:
+            # Create dialogue prompt
+            dialogue_prompt = f"""Based on the following reviews and previous discussions, generate a detailed dialogue between the reviewers. This is iteration {current_iteration}.
+
+    Previous Context:
+    {dialogue_context}
+
+    Current Reviews:
     """
             for review in reviews:
                 if not review.get('error', False):
                     dialogue_prompt += f"\n{review['reviewer']}:\n{review['content']}\n"
 
             dialogue_prompt += """
-    Generate a natural dialogue where reviewers:
-    1. Defend their positions
-    2. Challenge each other's assessments
-    3. Discuss points of agreement and disagreement
-    4. Work toward consensus where possible
-    5. Maintain their expertise perspective
+    Generate a natural dialogue that:
+    1. References and builds upon previous discussions and agreements
+    2. Addresses any unresolved points from earlier iterations
+    3. Works toward consensus where possible
+    4. Maintains individual expertise perspectives
+    5. Considers both technical and broader impacts
 
-    Format as a conversation with clear speaker labels."""
+    Track key points of:
+    - Agreements reached
+    - Remaining disagreements
+    - New insights or perspectives
+    - Action items or recommendations
 
-            # Initialize conversation
+    Format as a detailed conversation with clear speaker labels and logical progression."""
+
+            # Generate dialogue
             agent = ChatOpenAI(
                 temperature=0.7,
                 openai_api_key=st.secrets["openai_api_key"],
                 model="gpt-4o"
             )
             
-            # Generate initial dialogue
             response = agent.invoke([HumanMessage(content=dialogue_prompt)])
-            dialogue_messages.append({
-                'content': response.content,
-                'timestamp': datetime.now().isoformat()
-            })
             
-            # Generate follow-up discussion focusing on key disagreements
-            followup_prompt = f"""Based on the previous dialogue:
+            # Generate summary of key points
+            summary_prompt = f"""Based on this dialogue:
     {response.content}
 
-    Continue the discussion between the reviewers, focusing on:
-    1. Unresolved disagreements
-    2. Potential compromises
-    3. Final recommendations
+    Provide a concise summary of:
+    1. Key agreements reached
+    2. Remaining points of contention
+    3. New insights or perspectives gained
+    4. Specific recommendations or action items
 
-    The reviewers should maintain their expertise perspectives while working toward actionable conclusions."""
+    Focus on how this discussion evolved from previous iterations and what progress was made."""
 
-            response = agent.invoke([HumanMessage(content=followup_prompt)])
-            dialogue_messages.append({
-                'content': response.content,
-                'timestamp': datetime.now().isoformat()
-            })
+            summary_response = agent.invoke([HumanMessage(content=summary_prompt)])
             
-            return dialogue_messages
+            return {
+                'content': response.content,
+                'key_points': summary_response.content,
+                'timestamp': datetime.now().isoformat()
+            }
             
         except Exception as e:
             error_msg = f"Dialogue generation failed: {str(e)}"
             logging.error(error_msg)
-            return [{
+            return {
                 'content': error_msg,
+                'key_points': '',
                 'timestamp': datetime.now().isoformat(),
                 'error': True
-            }]
-    
+            }
+
     def _process_full_content(self, agent, content: str, reviewer: Dict[str, Any], config: Dict[str, Any], iteration: int, previous_context: str) -> Dict[str, Any]:
         """Process a full document review with structured sections."""
         try:
