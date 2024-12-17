@@ -1246,6 +1246,19 @@ class ReviewManager:
     def _generate_reviewer_dialogue(self, reviews: List[Dict[str, Any]], previous_iterations: List[Dict[str, Any]], config: Dict[str, Any]) -> Dict[str, Any]:
         """Generate a dialogue between reviewers that builds on previous discussions."""
         try:
+            if not reviews:
+                raise ValueError("No reviews provided for dialogue generation")
+                
+            valid_reviews = [r for r in reviews if (
+                isinstance(r, dict) and 
+                not r.get('error', False) and 
+                r.get('reviewer') and 
+                r.get('content')
+            )]
+            
+            if not valid_reviews:
+                raise ValueError("No valid reviews found for dialogue generation")
+
             current_iteration = len(previous_iterations) + 1
             dialogue_context = ""
             
@@ -1255,20 +1268,14 @@ class ReviewManager:
                 for idx, iteration in enumerate(previous_iterations, 1):
                     dialogue_context += f"Iteration {idx} Key Points:\n"
                     if iteration.get('dialogue'):
-                        # Extract key agreements and disagreements from previous dialogue
                         for dialogue in iteration['dialogue']:
-                            dialogue_context += f"{dialogue.get('key_points', '')}\n"
+                            if isinstance(dialogue, dict) and dialogue.get('key_points'):
+                                dialogue_context += f"{dialogue['key_points']}\n"
                     dialogue_context += "\n"
 
-            # Get reviewer names/expertise
-            reviewers = []
-            for review in reviews:
-                if not review.get('error', False) and review.get('reviewer'):
-                    reviewers.append(review['reviewer'])
-
-            if not reviewers:
-                raise ValueError("No valid reviewers found")
-
+            # Extract reviewer information
+            reviewers = [review['reviewer'] for review in valid_reviews]
+            
             # Create dialogue prompt
             dialogue_prompt = f"""Based on the following {len(reviewers)} expert reviews and previous discussions, generate a detailed dialogue between the reviewers. This is iteration {current_iteration}.
 
@@ -1279,9 +1286,9 @@ class ReviewManager:
 
     Current Reviews:
     """
-            for review in reviews:
-                if not review.get('error', False) and review.get('reviewer') and review.get('content'):
-                    dialogue_prompt += f"\n{review['reviewer']}:\n{review['content']}\n"
+            # Add review content
+            for review in valid_reviews:
+                dialogue_prompt += f"\n{review['reviewer']}:\n{review['content']}\n"
 
             dialogue_prompt += """
     Generate a natural dialogue that:
@@ -1326,7 +1333,8 @@ class ReviewManager:
                 'content': response.content,
                 'key_points': summary_response.content,
                 'timestamp': datetime.now().isoformat(),
-                'reviewers': reviewers
+                'reviewers': reviewers,
+                'iteration': current_iteration
             }
             
         except Exception as e:
@@ -1337,9 +1345,10 @@ class ReviewManager:
                 'key_points': '',
                 'timestamp': datetime.now().isoformat(),
                 'error': True,
-                'reviewers': []
+                'reviewers': [],
+                'iteration': len(previous_iterations) + 1
             }
-    
+
     def _process_full_content(self, agent, content: str, reviewer: Dict[str, Any], config: Dict[str, Any], iteration: int, previous_context: str) -> Dict[str, Any]:
         """Process a full document review with structured sections."""
         try:
