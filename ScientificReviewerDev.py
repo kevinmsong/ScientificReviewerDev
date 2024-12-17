@@ -226,13 +226,12 @@ def extract_pptx_content(pptx_file) -> tuple[str, List[Dict[str, Any]]]:
         raise Exception(f"Error processing PowerPoint: {str(e)}")
 
 def parse_review_sections(content: str) -> Dict[str, str]:
-    """Parse review content into structured sections with cleaned formatting."""
+    """Parse review content into structured sections with enhanced formatting."""
     sections = {}
     
     # Define section markers and their keys
     section_markers = {
         'RESPONSE TO PREVIOUS REVIEWS': 'response',
-        'SECTION-BY-SECTION ANALYSIS': 'analysis',
         'SIGNIFICANCE EVALUATION': 'significance',
         'INNOVATION ASSESSMENT': 'innovation',
         'APPROACH ANALYSIS': 'approach',
@@ -255,7 +254,7 @@ def parse_review_sections(content: str) -> Dict[str, str]:
             if next_section_start == float('inf'):
                 next_section_start = len(content)
             
-            section_content = content[start + len(marker):next_section_start].strip(':').strip()
+            section_content = content[start + len(marker):next_section_start].strip()
             
             # Clean up the content
             section_content = re.sub(r'\*\*(.*?)\*\*', r'\1', section_content)  # Remove bold markers
@@ -325,16 +324,15 @@ def parse_slide_review(content: str) -> Dict[str, str]:
     
     return sections
 
-def display_review_sections(sections: Dict[str, str]):
-    """Display review sections with improved formatting."""
+def display_review_sections(sections: Dict[str, str], is_nih: bool = False):
+    """Display review sections with enhanced formatting."""
     section_order = [
-        'response', 'analysis', 'significance', 'innovation', 
+        'response', 'significance', 'innovation', 
         'approach', 'scoring', 'recommendations'
     ]
     
     icons = {
         'response': '💬',
-        'analysis': '📝',
         'significance': '🎯',
         'innovation': '💡',
         'approach': '🔍',
@@ -344,7 +342,6 @@ def display_review_sections(sections: Dict[str, str]):
     
     titles = {
         'response': 'Response to Previous Reviews',
-        'analysis': 'Section Analysis',
         'significance': 'Significance Evaluation',
         'innovation': 'Innovation Assessment',
         'approach': 'Approach Analysis',
@@ -356,64 +353,100 @@ def display_review_sections(sections: Dict[str, str]):
         if section in sections:
             content = sections[section]
             
-            # Clean up the content
-            content = content.replace('**', '')  # Remove unnecessary asterisks
-            content = re.sub(r'\n{3,}', '\n\n', content)  # Remove extra newlines
-            content = content.strip()
-            
             st.markdown(f"### {icons[section]} {titles[section]}")
             
-            if section == 'analysis':
-                # Special handling for section analysis to format subsections
-                for line in content.split('\n'):
-                    if ':' in line:
-                        part, desc = line.split(':', 1)
-                        if 'Content Summary' in part:
-                            st.markdown(f"**{part.strip()}:**{desc}")
+            if is_nih and section in ['significance', 'innovation', 'approach']:
+                # Format NIH-specific sections
+                lines = content.split('\n')
+                current_subsection = None
+                subsection_content = []
+                
+                for line in lines:
+                    if re.match(r'^\d+\.', line):
+                        if current_subsection and subsection_content:
+                            st.markdown(f"**{current_subsection}**")
+                            for point in subsection_content:
+                                if point.strip():
+                                    st.markdown(f"- {point.strip()}")
                             st.markdown("---")
-                        elif 'Critical Changes' in part:
-                            st.markdown(f"**{part.strip()}:**{desc}")
-                            st.markdown("---")
-                        elif 'Suggested Improvements' in part:
-                            st.markdown(f"**{part.strip()}:**{desc}")
-                            st.markdown("---")
-                        elif 'Specific Line Edits' in part:
-                            st.markdown(f"**{part.strip()}:**{desc}")
-                            st.markdown("---")
-                        else:
-                            st.markdown(line)
-                    else:
-                        if line.strip():
-                            st.markdown(line)
-            
+                        current_subsection = line.strip()
+                        subsection_content = []
+                    elif line.strip():
+                        subsection_content.append(line)
+                
+                if current_subsection and subsection_content:
+                    st.markdown(f"**{current_subsection}**")
+                    for point in subsection_content:
+                        if point.strip():
+                            st.markdown(f"- {point.strip()}")
+                    st.markdown("---")
+                
             elif section == 'scoring':
-                # Special handling for scoring section
-                for line in content.split('\n'):
-                    if '★' in line:
-                        category, score = line.split(':', 1)
-                        st.markdown(f"**{category.strip()}:** {score.strip()}")
+                # Format scoring section
+                scores = re.findall(r'([^:]+):\s*\[(\d+)\][^\n]*(?:\n|$)', content)
+                for category, score in scores:
+                    category = category.strip()
+                    if is_nih:
+                        st.markdown(f"**{category}:** {score}/9")
+                        # Extract and display score justification
+                        justification = re.search(f"{category}:.*?\\[{score}\\](.*?)(?=\\n\\w|$)", content, re.DOTALL)
+                        if justification:
+                            st.markdown(justification.group(1).strip())
                     else:
-                        if line.strip():
-                            st.markdown(line)
-            
+                        st.markdown(f"**{category}:** {'★' * int(score)}{'☆' * (5 - int(score))}")
+                st.markdown("---")
+                
             elif section == 'recommendations':
-                # Special handling for recommendations
-                current_section = None
+                # Format recommendations section
+                required = []
+                optional = []
+                current_list = None
+                
                 for line in content.split('\n'):
                     if 'Critical changes needed:' in line:
-                        current_section = "Required Changes"
-                        st.markdown(f"**{current_section}:**")
+                        current_list = required
                     elif 'Suggested improvements:' in line:
-                        current_section = "Optional Improvements"
-                        st.markdown(f"**{current_section}:**")
-                    else:
-                        if line.strip() and not line.startswith('**'):
-                            st.markdown(f"- {line.strip()}")
-            
+                        current_list = optional
+                    elif line.strip().startswith('-') and current_list is not None:
+                        current_list.append(line.strip()[1:].strip())
+                
+                if required:
+                    st.markdown("**Required Changes:**")
+                    for item in required:
+                        st.markdown(f"- {item}")
+                
+                if optional:
+                    st.markdown("**Optional Improvements:**")
+                    for item in optional:
+                        st.markdown(f"- {item}")
+                st.markdown("---")
+                
             else:
-                st.markdown(content)
-            
-            st.markdown("---")
+                # Format regular sections
+                paragraphs = content.split('\n\n')
+                for paragraph in paragraphs:
+                    if paragraph.strip():
+                        st.markdown(paragraph.strip())
+                st.markdown("---")
+
+def format_dialogue(dialogue_content: str) -> str:
+    """Format reviewer dialogue with clear speaker labels and structure."""
+    formatted = ""
+    lines = dialogue_content.split('\n')
+    current_speaker = None
+    
+    for line in lines:
+        if ':' in line and not line.strip().endswith(':'):
+            speaker, message = line.split(':', 1)
+            if re.match(r'^[A-Za-z\s]+$', speaker.strip()):
+                current_speaker = speaker.strip()
+                formatted += f"**{current_speaker}**: {message.strip()}\n\n"
+            else:
+                formatted += f"{line.strip()}\n\n"
+        else:
+            formatted += f"{line.strip()}\n\n"
+    
+    return formatted.strip()
 
 def display_moderator_sections(content: str):
     """Display moderator summary sections with consistent formatting."""
@@ -449,8 +482,69 @@ def display_moderator_sections(content: str):
     if not any(section in sections for section in section_order):
         st.markdown(content)  # Fallback: display raw content if parsing fails
 
+def parse_nih_review_sections(content: str) -> Dict[str, str]:
+    """Parse NIH grant review content with special formatting."""
+    sections = {}
+    
+    section_markers = {
+        'RESPONSE TO PREVIOUS REVIEWS': 'response',
+        'SIGNIFICANCE EVALUATION': 'significance',
+        'INNOVATION ASSESSMENT': 'innovation',
+        'APPROACH ANALYSIS': 'approach',
+        'SCORING': 'scoring',
+        'RECOMMENDATIONS': 'recommendations'
+    }
+    
+    subsection_patterns = {
+        'significance': [
+            r'1\.\s*Important\s*Problem/Critical\s*Barrier:(.*?)(?=2\.|$)',
+            r'2\.\s*Scientific/Technical/Clinical\s*Advancement:(.*?)(?=3\.|$)',
+            r'3\.\s*Impact\s*Potential:(.*?)(?=\n\n[A-Z]|$)'
+        ],
+        'innovation': [
+            r'1\.\s*Research\s*Paradigm\s*Challenge:(.*?)(?=2\.|$)',
+            r'2\.\s*Novelty\s*Analysis:(.*?)(?=3\.|$)',
+            r'3\.\s*State-of-the-Art\s*Advancement:(.*?)(?=\n\n[A-Z]|$)'
+        ],
+        'approach': [
+            r'1\.\s*Strategy\s*and\s*Methodology:(.*?)(?=2\.|$)',
+            r'2\.\s*Risk\s*Management:(.*?)(?=3\.|$)',
+            r'3\.\s*Feasibility:(.*?)(?=\n\n[A-Z]|$)'
+        ]
+    }
+    
+    # Extract main sections
+    for marker, key in section_markers.items():
+        if marker in content:
+            start = content.find(marker)
+            next_section_start = float('inf')
+            for other_marker in section_markers:
+                if other_marker != marker:
+                    pos = content.find(other_marker, start + len(marker))
+                    if pos != -1 and pos < next_section_start:
+                        next_section_start = pos
+            
+            if next_section_start == float('inf'):
+                next_section_start = len(content)
+            
+            section_content = content[start + len(marker):next_section_start].strip()
+            
+            # Format subsections for NIH-specific sections
+            if key in subsection_patterns:
+                formatted_content = ""
+                for pattern in subsection_patterns[key]:
+                    match = re.search(pattern, section_content, re.DOTALL | re.IGNORECASE)
+                    if match:
+                        subsection_content = match.group(1).strip()
+                        formatted_content += f"{match.group(0).split(':')[0]}:\n{subsection_content}\n\n"
+                sections[key] = formatted_content.strip()
+            else:
+                sections[key] = section_content
+    
+    return sections
+
 def display_review_results(results: Dict[str, Any]):
-    """Display review results with improved formatting and error handling."""
+    """Display review results with enhanced formatting."""
     st.markdown("## Review Results")
     
     if not results.get('iterations'):
@@ -462,58 +556,68 @@ def display_review_results(results: Dict[str, Any]):
     if not valid_iterations:
         st.warning("No valid reviews to display.")
         return
+    
+    is_nih = results.get('config', {}).get('doc_type') == "Grant" and \
+             results.get('config', {}).get('scoring') == "nih"
         
     tabs = st.tabs([f"Iteration {i+1}" for i in range(len(valid_iterations))])
     
     for idx, (tab, iteration) in enumerate(zip(tabs, valid_iterations)):
         with tab:
+            # Display initial reviews
+            st.markdown("### Initial Reviews")
             for review in iteration['reviews']:
                 with st.expander(f"Review by {review['reviewer']}", expanded=True):
                     if review.get('error', False):
                         st.error(review['content'])
                     elif review.get('is_presentation', False):
-                        # Display presentation review
+                        # Handle presentation reviews
                         st.markdown("### 📊 Overall Presentation Analysis")
                         st.markdown(review['content'])
                         st.markdown("---")
                         
-                        # Only create slide tabs if there are valid slide reviews
-                        valid_slides = [sr for sr in review['slide_reviews'] if not sr.get('error')]
-                        if valid_slides:
+                        if review.get('slide_reviews'):
                             st.markdown("### 🎯 Slide-by-Slide Review")
-                            slide_tabs = st.tabs([f"Slide {sr['slide_number']}" for sr in valid_slides])
+                            slide_tabs = st.tabs([f"Slide {sr['slide_number']}" 
+                                               for sr in review['slide_reviews'] 
+                                               if not sr.get('error')])
                             
-                            for slide_tab, slide_review in zip(slide_tabs, valid_slides):
-                                with slide_tab:
-                                    sections = parse_slide_review(slide_review['content'])
-                                    
-                                    for section_title, content in sections.items():
-                                        st.markdown(f"#### {section_title}")
-                                        st.markdown(content)
-                                        st.markdown("---")
-                                    
-                                    if slide_review.get('scores'):
-                                        st.markdown("#### Scores")
-                                        for category, score in slide_review['scores'].items():
-                                            st.markdown(f"**{category}:** {'★' * int(score)}{'☆' * (5 - int(score))}")
-                        
-                        if review.get('structure_analysis'):
-                            st.markdown("### 📈 Presentation Structure")
-                            for item in review['structure_analysis']:
-                                st.markdown(f"**Slide {item['slide_number']} ({item['content_type']}):**")
-                                if item.get('key_points'):
-                                    for point in item['key_points']:
-                                        st.markdown(f"- {point}")
+                            for slide_tab, slide_review in zip(slide_tabs, review['slide_reviews']):
+                                if not slide_review.get('error'):
+                                    with slide_tab:
+                                        sections = parse_slide_review(slide_review['content'])
+                                        for section_title, content in sections.items():
+                                            st.markdown(f"#### {section_title}")
+                                            st.markdown(content)
+                                            st.markdown("---")
                     else:
-                        # Display regular review content
-                        sections = parse_review_sections(review['content'])
-                        display_review_sections(sections)
+                        # Handle regular document reviews
+                        if is_nih:
+                            sections = parse_nih_review_sections(review['content'])
+                        else:
+                            sections = parse_review_sections(review['content'])
+                        display_review_sections(sections, is_nih)
                     
                     st.markdown(f"*Reviewed at: {review['timestamp']}*")
+            
+            # Display reviewer dialogue
+            if iteration.get('dialogue'):
+                st.markdown("### 💬 Reviewer Discussion")
+                for msg_idx, dialogue in enumerate(iteration['dialogue'], 1):
+                    with st.expander(f"Discussion Round {msg_idx}", expanded=True):
+                        if dialogue.get('error', False):
+                            st.error(dialogue['content'])
+                        else:
+                            formatted_dialogue = format_dialogue(dialogue['content'])
+                            st.markdown(formatted_dialogue)
+                        st.markdown(f"*Discussion at: {dialogue['timestamp']}*")
+                st.markdown("---")
     
     # Display moderator summary
     if results.get('moderator_summary'):
-        st.markdown("## 🎯 Moderator Analysis")
+        st.markdown("## 🎯 Final Analysis")
+        if is_nih:
+            st.markdown("### NIH Review Summary")
         display_moderator_sections(results['moderator_summary'])
 
 class ModeratorAgent:
@@ -997,16 +1101,155 @@ class ReviewManager:
             "Presentation": "gpt-4o"
         }
         self.moderator = ModeratorAgent()
+
+    def _generate_reviewer_dialogue(self, reviews: List[Dict[str, Any]], config: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Generate a dialogue between reviewers discussing their different viewpoints."""
+        try:
+            dialogue_messages = []
+            reviewers = [review['reviewer'] for review in reviews if not review.get('error', False)]
+            
+            # Create initial dialogue prompt
+            dialogue_prompt = f"""Based on the following reviews of this {config['doc_type'].lower()}, generate a realistic dialogue between the reviewers discussing their viewpoints:
+
+    Reviews:
+    """
+            for review in reviews:
+                if not review.get('error', False):
+                    dialogue_prompt += f"\n{review['reviewer']}:\n{review['content']}\n"
+
+            dialogue_prompt += """
+    Generate a natural dialogue where reviewers:
+    1. Defend their positions
+    2. Challenge each other's assessments
+    3. Discuss points of agreement and disagreement
+    4. Work toward consensus where possible
+    5. Maintain their expertise perspective
+
+    Format as a conversation with clear speaker labels."""
+
+            # Initialize conversation
+            agent = ChatOpenAI(
+                temperature=0.7,
+                openai_api_key=st.secrets["openai_api_key"],
+                model="gpt-4o"
+            )
+            
+            # Generate initial dialogue
+            response = agent.invoke([HumanMessage(content=dialogue_prompt)])
+            dialogue_messages.append({
+                'content': response.content,
+                'timestamp': datetime.now().isoformat()
+            })
+            
+            # Generate follow-up discussion focusing on key disagreements
+            followup_prompt = f"""Based on the previous dialogue:
+    {response.content}
+
+    Continue the discussion between the reviewers, focusing on:
+    1. Unresolved disagreements
+    2. Potential compromises
+    3. Final recommendations
+
+    The reviewers should maintain their expertise perspectives while working toward actionable conclusions."""
+
+            response = agent.invoke([HumanMessage(content=followup_prompt)])
+            dialogue_messages.append({
+                'content': response.content,
+                'timestamp': datetime.now().isoformat()
+            })
+            
+            return dialogue_messages
+            
+        except Exception as e:
+            error_msg = f"Dialogue generation failed: {str(e)}"
+            logging.error(error_msg)
+            return [{
+                'content': error_msg,
+                'timestamp': datetime.now().isoformat(),
+                'error': True
+            }]
     
     def _process_full_content(self, agent, content: str, reviewer: Dict[str, Any], config: Dict[str, Any], iteration: int, previous_context: str) -> Dict[str, Any]:
         """Process a full document review with structured sections."""
         try:
-            scoring_guide = (
-                "Rate each section 1-5 stars (★)" if config['scoring'] == 'stars'
-                else "Rate each section on NIH scale (1-9, where 1 is exceptional and 9 is poor)"
-            )
-            
-            prompt = f"""As a {reviewer['expertise']}, review this {config['doc_type'].lower()} for {config['venue']}.
+            # Special handling for NIH grants
+            if config['doc_type'] == "Grant" and config['scoring'] == "nih":
+                prompt = f"""As a {reviewer['expertise']}, review this NIH grant for {config['venue']}.
+
+    Iteration: {iteration}
+    {previous_context}
+
+    Document Content:
+    {content}
+
+    Provide a detailed review using these exact sections:
+
+    RESPONSE TO PREVIOUS REVIEWS:
+    Only address previous reviews if this is a later iteration.
+
+    SIGNIFICANCE EVALUATION:
+    1. Important Problem/Critical Barrier:
+    - Does the project address an important problem or critical barrier to progress in the field?
+    - Specific evidence and analysis required
+
+    2. Scientific/Technical/Clinical Advancement:
+    - How will scientific knowledge, technical capability, or clinical practice be advanced?
+    - Concrete examples of potential advances
+
+    3. Impact Potential:
+    - What is the potential to change concepts, methods, technologies, or treatments?
+    - Specific areas of impact
+
+    INNOVATION ASSESSMENT:
+    1. Research Paradigm Challenge:
+    - Does the project challenge or seek to shift current research paradigms?
+    - Specific examples of paradigm shifts
+
+    2. Novelty Analysis:
+    - Are concepts, approaches, or methodologies novel?
+    - Detailed assessment of originality
+
+    3. State-of-the-Art Advancement:
+    - Is the work a refinement, improvement, or application of state-of-the-art ideas?
+    - Specific technological or methodological advances
+
+    APPROACH ANALYSIS:
+    1. Strategy and Methodology:
+    - Are the strategy, methodology, and analyses well-reasoned and appropriate?
+    - Detailed assessment of research plan
+
+    2. Risk Management:
+    - Are potential problems, alternative strategies, and benchmarks for success considered?
+    - Specific contingency plans
+
+    3. Feasibility:
+    - Is the approach feasible within the proposed timeline and resources?
+    - Resource and timeline analysis
+
+    SCORING (NIH Scale 1-9, where 1 is exceptional and 9 is poor):
+    - Significance Score: [score]
+    Detailed justification...
+    - Innovation Score: [score]
+    Detailed justification...
+    - Approach Score: [score]
+    Detailed justification...
+    - Overall Impact Score: [score]
+    Detailed justification...
+
+    RECOMMENDATIONS:
+    Critical changes needed:
+    - List required revisions
+
+    Suggested improvements:
+    - List optional enhancements"""
+            else:
+                # Original prompt for other document types
+                scoring_guide = (
+                    "Rate each section 1-5 stars (★)" if config['scoring'] == 'stars'
+                    else "Rate each section on NIH scale (1-9, where 1 is exceptional and 9 is poor)"
+                )
+                
+                prompt = f"""As a {reviewer['expertise']}, review this {config['doc_type'].lower()} for {config['venue']}.
 
     Iteration: {iteration}
     {previous_context}
@@ -1104,7 +1347,7 @@ class ReviewManager:
         return context
 
     def process_review(self, content: str, sections: List[Dict[str, Any]], config: Dict[str, Any]) -> Dict[str, Any]:
-        """Process document review with multiple iterations and moderation."""
+        """Process document review with multiple iterations, dialogue, and moderation."""
         iterations = []
         all_reviews = []
         
@@ -1119,6 +1362,7 @@ class ReviewManager:
                 iteration_reviews = []
                 previous_context = self._create_previous_context(all_reviews)
                 
+                # Initial reviews
                 for reviewer in config['reviewers']:
                     try:
                         model = self.model_config.get(config['doc_type'], "gpt-4o")
@@ -1166,10 +1410,20 @@ class ReviewManager:
                             'error': True
                         })
                 
-                iterations.append({
-                    'iteration_number': iteration + 1,
-                    'reviews': iteration_reviews
-                })
+                # Generate reviewer dialogue
+                if not is_presentation:  # Skip dialogue for presentations
+                    dialogue = self._generate_reviewer_dialogue(iteration_reviews, config)
+                    
+                    iterations.append({
+                        'iteration_number': iteration + 1,
+                        'reviews': iteration_reviews,
+                        'dialogue': dialogue
+                    })
+                else:
+                    iterations.append({
+                        'iteration_number': iteration + 1,
+                        'reviews': iteration_reviews
+                    })
             
             moderator_summary = self.moderator.summarize_discussion(iterations)
             
@@ -1276,7 +1530,7 @@ def main():
     - PowerPoint (.pptx): Presentations for slide-by-slide review
     """
     uploaded_file = st.file_uploader(
-        "Upload Document", 
+        "Upload Document", "Upload Document",
         type=["pdf", "pptx"],
         help=file_type_help
     )
