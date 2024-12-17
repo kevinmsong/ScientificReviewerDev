@@ -1324,6 +1324,59 @@ class ReviewManager:
                 'reviewers': [],
                 'iteration': len(previous_iterations) + 1
             }
+    
+    def _create_review_context(self, previous_iterations: List[Dict[str, Any]], current_reviewer: str) -> str:
+        """Create comprehensive context from previous iterations for a specific reviewer."""
+        if not previous_iterations:
+            return ""
+        
+        context = "\nContext from Previous Iterations:\n\n"
+        
+        for idx, iteration in enumerate(previous_iterations, 1):
+            context += f"Iteration {idx}:\n"
+            
+            # Add previous reviews
+            if iteration.get('reviews'):
+                # First add the current reviewer's previous review
+                for review in iteration['reviews']:
+                    if (not review.get('error', False) and 
+                        review.get('reviewer') and 
+                        review.get('content')):
+                        # Identify if this is the current reviewer's previous review
+                        is_own_review = review['reviewer'] == current_reviewer
+                        if is_own_review:
+                            context += f"\nYour previous review:\n{review['content']}\n"
+
+                # Then add other reviewers' reviews
+                for review in iteration['reviews']:
+                    if (not review.get('error', False) and 
+                        review.get('reviewer') and 
+                        review.get('content') and 
+                        review['reviewer'] != current_reviewer):
+                        context += f"\nReview by {review['reviewer']}:\n{review['content']}\n"
+            
+            # Add discussion outcomes
+            if iteration.get('dialogue'):
+                context += "\nDiscussion Outcomes:\n"
+                for dialogue in iteration['dialogue']:
+                    if isinstance(dialogue, dict):
+                        if dialogue.get('key_points'):
+                            context += f"Key Points:\n{dialogue['key_points']}\n"
+                        if dialogue.get('content'):
+                            context += f"Discussion:\n{dialogue['content']}\n"
+            
+            context += "\n---\n"
+        
+        # Add prompt for how to use the context
+        context += """
+    Based on the previous iterations:
+    1. Address points raised by other reviewers
+    2. Build upon areas of consensus
+    3. Provide new perspectives on points of disagreement
+    4. Consider how the document has evolved (if multiple iterations)
+    """
+        
+        return context
 
     def _process_full_content(self, agent, content: str, reviewer: Dict[str, Any], config: Dict[str, Any], iteration: int, previous_context: str) -> Dict[str, Any]:
         """Process a full document review with structured sections."""
@@ -1524,12 +1577,13 @@ class ReviewManager:
                 raise ValueError("No reviewers specified in configuration")
                 
             reviewers = config['reviewers']
+            logging.info(f"Starting review process with {len(reviewers)} reviewers")
             
             # Define is_presentation at the start
             is_presentation = any(section.get('type') == 'slide' for section in sections)
             if is_presentation:
                 config['doc_type'] = "Presentation"
-            
+                
             temperature = self._calculate_temperature(config.get('bias', 0))
             model = self.model_config.get(config['doc_type'], "gpt-4o")
             
@@ -1542,8 +1596,7 @@ class ReviewManager:
                     try:
                         logging.info(f"Processing reviewer {rev_idx + 1}: {reviewer['expertise']}")
                         
-                        # Create context from all previous iterations for this reviewer
-                        previous_context = self._create_review_context(iterations, reviewer['expertise'])
+                        previous_context = self._create_previous_context(iterations)
                         
                         if is_presentation:
                             presentation_reviewer = PresentationReviewer(model=model)
@@ -1634,7 +1687,7 @@ class ReviewManager:
                 logging.error(f"Error generating moderator summary: {str(e)}")
                 moderator_summary = f"Error generating final analysis: {str(e)}"
             
-            return {
+            final_result = {
                 'iterations': iterations,
                 'moderator_summary': moderator_summary,
                 'config': config,
@@ -1643,6 +1696,9 @@ class ReviewManager:
                 'is_presentation': is_presentation,
                 'reviewers': [r['expertise'] for r in reviewers]
             }
+            
+            logging.info("Review process completed successfully")
+            return final_result
             
         except Exception as e:
             logging.error(f"Error in review process: {str(e)}")
@@ -1761,7 +1817,7 @@ def main():
     uploaded_file = st.file_uploader(
         "Upload Document",
         type=["pdf", "pptx"],
-        help=file_type_help
+        help=file_type_helphelp=file_type_help
     )
     
     if uploaded_file:
