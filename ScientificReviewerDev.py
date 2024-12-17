@@ -209,21 +209,32 @@ def clean_text_formatting(text: str) -> str:
     return text.strip()
 
 def extract_pptx_content(pptx_file) -> tuple[str, List[Dict[str, Any]]]:
-    """Extract content from PowerPoint with slide preservation."""
+    """Extract content from PowerPoint with slide preservation and improved error handling."""
+    temp_file = "temp.pptx"
     try:
+        if not pptx_file or not pptx_file.getvalue():
+            raise ValueError("Empty or invalid PowerPoint file")
+
         # Save uploaded file temporarily
-        with open("temp.pptx", "wb") as f:
+        with open(temp_file, "wb") as f:
             f.write(pptx_file.getvalue())
         
         # Load and process slides
-        loader = UnstructuredPowerPointLoader("temp.pptx")
+        loader = UnstructuredPowerPointLoader(temp_file)
         documents = loader.load()
         
+        if not documents:
+            raise ValueError("No content found in PowerPoint file")
+
         full_content = ""
         sections = []
         
         for idx, doc in enumerate(documents):
             content = doc.page_content
+            if not content.strip():
+                logging.warning(f"Empty content in slide {idx + 1}")
+                continue
+
             full_content += f"\nSlide {idx + 1}:\n{content}\n"
             sections.append({
                 'type': 'slide',
@@ -232,12 +243,24 @@ def extract_pptx_content(pptx_file) -> tuple[str, List[Dict[str, Any]]]:
                 'metadata': doc.metadata
             })
         
-        import os
-        os.remove("temp.pptx")  # Clean up
-        
+        if not sections:
+            raise ValueError("No valid slides found in presentation")
+
         return full_content.strip(), sections
+        
     except Exception as e:
-        raise Exception(f"Error processing PowerPoint: {str(e)}")
+        error_msg = f"Error processing PowerPoint: {str(e)}"
+        logging.error(error_msg)
+        raise Exception(error_msg)
+        
+    finally:
+        # Clean up temporary file
+        import os
+        if os.path.exists(temp_file):
+            try:
+                os.remove(temp_file)
+            except Exception as e:
+                logging.error(f"Failed to remove temporary file: {str(e)}")
 
 def parse_review_sections(content: str) -> Dict[str, str]:
     """Parse review content into structured sections with enhanced formatting."""
@@ -575,103 +598,139 @@ def parse_nih_review_sections(content: str) -> Dict[str, str]:
     return sections
 
 def display_review_results(results: Dict[str, Any]):
-    """Display review results with enhanced formatting and organization."""
-    st.markdown("## Review Results")
-    
-    if not results.get('iterations'):
-        st.warning("No review results available.")
-        return
-    
-    valid_iterations = [i for i in results['iterations'] if i['reviews']]
-    if not valid_iterations:
-        st.warning("No valid reviews to display.")
-        return
-    
-    is_nih = results.get('config', {}).get('doc_type') == "Grant" and \
-             results.get('config', {}).get('scoring') == "nih"
-    
-    # Create tabs for iterations and final analysis
-    tab_titles = [f"Iteration {i+1}" for i in range(len(valid_iterations))]
-    tab_titles.append("Final Analysis")
-    tabs = st.tabs(tab_titles)
-    
-    # Display iterations
-    for idx, (tab, iteration) in enumerate(zip(tabs[:-1], valid_iterations)):
-        with tab:
-            # Display initial reviews
-            st.markdown("### Initial Reviews")
-            for review in iteration['reviews']:
-                with st.expander(f"Review by {review['reviewer']}", expanded=True):
-                    if review.get('error', False):
-                        st.error(review['content'])
-                    elif review.get('is_presentation', False):
-                        # Handle presentation reviews
-                        st.markdown("📊 Overall Presentation Analysis")
-                        st.markdown(clean_text_formatting(review['content']))
-                        st.markdown("---")
-                        
-                        if review.get('slide_reviews'):
-                            st.markdown("🎯 Slide-by-Slide Review")
-                            slide_tabs = st.tabs([f"Slide {sr['slide_number']}" 
-                                               for sr in review['slide_reviews'] 
-                                               if not sr.get('error')])
+    """Display review results with enhanced formatting, organization, and error handling."""
+    try:
+        if not results:
+            st.warning("No results to display.")
+            return
+            
+        if not isinstance(results, dict):
+            st.error("Invalid results format.")
+            return
+
+        st.markdown("## Review Results")
+        
+        if not results.get('iterations'):
+            st.warning("No review iterations available.")
+            return
+        
+        valid_iterations = [i for i in results['iterations'] if i['reviews']]
+        if not valid_iterations:
+            st.warning("No valid reviews to display.")
+            return
+        
+        is_nih = results.get('config', {}).get('doc_type') == "Grant" and \
+                results.get('config', {}).get('scoring') == "nih"
+        
+        # Create tabs for iterations and final analysis
+        tab_titles = [f"Iteration {i+1}" for i in range(len(valid_iterations))]
+        tab_titles.append("Final Analysis")
+        
+        try:
+            tabs = st.tabs(tab_titles)
+        except Exception as e:
+            st.error("Error creating review tabs. Falling back to sequential display.")
+            tabs = [st.container() for _ in tab_titles]
+        
+        # Display iterations
+        for idx, (tab, iteration) in enumerate(zip(tabs[:-1], valid_iterations)):
+            with tab:
+                try:
+                    # Display initial reviews
+                    st.markdown("### Initial Reviews")
+                    for review in iteration['reviews']:
+                        with st.expander(f"Review by {review.get('reviewer', 'Unknown')}", expanded=True):
+                            if review.get('error', False):
+                                st.error(review['content'])
+                            elif review.get('is_presentation', False):
+                                # Handle presentation reviews
+                                st.markdown("📊 Overall Presentation Analysis")
+                                st.markdown(clean_text_formatting(review['content']))
+                                st.markdown("---")
+                                
+                                if review.get('slide_reviews'):
+                                    st.markdown("🎯 Slide-by-Slide Review")
+                                    valid_slides = [sr for sr in review['slide_reviews'] if not sr.get('error')]
+                                    
+                                    if valid_slides:
+                                        try:
+                                            slide_tabs = st.tabs([f"Slide {sr['slide_number']}" for sr in valid_slides])
+                                            
+                                            for slide_tab, slide_review in zip(slide_tabs, valid_slides):
+                                                with slide_tab:
+                                                    sections = parse_slide_review(slide_review['content'])
+                                                    for section_title, content in sections.items():
+                                                        st.markdown(f"#### {section_title}")
+                                                        st.markdown(clean_text_formatting(content))
+                                                        st.markdown("---")
+                                        except Exception as e:
+                                            st.error(f"Error displaying slides: {str(e)}")
+                            else:
+                                # Handle regular document reviews
+                                try:
+                                    if is_nih:
+                                        sections = parse_nih_review_sections(review['content'])
+                                    else:
+                                        sections = parse_review_sections(review['content'])
+                                    display_review_sections(sections, is_nih)
+                                except Exception as e:
+                                    st.error(f"Error parsing review sections: {str(e)}")
+                                    st.markdown(review['content'])  # Fallback to raw content
                             
-                            for slide_tab, slide_review in zip(slide_tabs, review['slide_reviews']):
-                                if not slide_review.get('error'):
-                                    with slide_tab:
-                                        sections = parse_slide_review(slide_review['content'])
-                                        for section_title, content in sections.items():
-                                            st.markdown(f"#### {section_title}")
-                                            st.markdown(clean_text_formatting(content))
-                                            st.markdown("---")
-                    else:
-                        # Handle regular document reviews
-                        if is_nih:
-                            sections = parse_nih_review_sections(review['content'])
-                        else:
-                            sections = parse_review_sections(review['content'])
-                        display_review_sections(sections, is_nih)
+                            st.markdown(f"*Reviewed at: {review.get('timestamp', 'Unknown time')}*")
                     
-                    st.markdown(f"*Reviewed at: {review['timestamp']}*")
-            
-            # Display reviewer dialogue
-            if iteration.get('dialogue'):
-                st.markdown("### 💬 Reviewer Discussion")
-                for msg_idx, dialogue in enumerate(iteration['dialogue'], 1):
-                    with st.expander(f"Discussion Round {msg_idx}", expanded=True):
-                        if dialogue.get('error', False):
-                            st.error(dialogue['content'])
-                        else:
-                            formatted_dialogue = format_dialogue(dialogue['content'])
-                            st.markdown(clean_text_formatting(formatted_dialogue))
-                        st.markdown(f"*Discussion at: {dialogue['timestamp']}*")
-                st.markdown("---")
-    
-    # Display final analysis in its own tab
-    with tabs[-1]:
-        if results.get('moderator_summary'):
-            if is_nih:
-                st.markdown("### NIH Review Summary")
-            
-            # Parse and display moderator sections
-            sections = parse_moderator_sections(results['moderator_summary'])
-            
-            # Display each section with clean formatting
-            section_titles = {
-                'agreement': '🤝 Points of Agreement',
-                'contention': '⚖️ Points of Contention',
-                'evolution': '📈 Discussion Evolution',
-                'synthesis': '🎯 Final Synthesis'
-            }
-            
-            for key, title in section_titles.items():
-                if key in sections:
-                    st.markdown(f"### {title}")
-                    formatted_content = clean_text_formatting(sections[key])
-                    st.markdown(formatted_content)
-                    st.markdown("---")
-        else:
-            st.warning("No final analysis available.")
+                    # Display reviewer dialogue
+                    if iteration.get('dialogue'):
+                        st.markdown("### 💬 Reviewer Discussion")
+                        for msg_idx, dialogue in enumerate(iteration['dialogue'], 1):
+                            with st.expander(f"Discussion Round {msg_idx}", expanded=True):
+                                if dialogue.get('error', False):
+                                    st.error(dialogue['content'])
+                                else:
+                                    formatted_dialogue = format_dialogue(dialogue['content'])
+                                    st.markdown(clean_text_formatting(formatted_dialogue))
+                                    if dialogue.get('key_points'):
+                                        st.markdown("#### Key Points")
+                                        st.markdown(clean_text_formatting(dialogue['key_points']))
+                                st.markdown(f"*Discussion at: {dialogue.get('timestamp', 'Unknown time')}*")
+                        st.markdown("---")
+                except Exception as e:
+                    st.error(f"Error displaying iteration {idx + 1}: {str(e)}")
+        
+        # Display final analysis in its own tab
+        with tabs[-1]:
+            try:
+                if results.get('moderator_summary'):
+                    if is_nih:
+                        st.markdown("### NIH Review Summary")
+                    
+                    # Parse and display moderator sections
+                    sections = parse_moderator_sections(results['moderator_summary'])
+                    
+                    # Display each section with clean formatting
+                    section_titles = {
+                        'agreement': '🤝 Points of Agreement',
+                        'contention': '⚖️ Points of Contention',
+                        'evolution': '📈 Discussion Evolution',
+                        'synthesis': '🎯 Final Synthesis'
+                    }
+                    
+                    for key, title in section_titles.items():
+                        if key in sections:
+                            st.markdown(f"### {title}")
+                            formatted_content = clean_text_formatting(sections[key])
+                            st.markdown(formatted_content)
+                            st.markdown("---")
+                else:
+                    st.warning("No final analysis available.")
+            except Exception as e:
+                st.error(f"Error displaying final analysis: {str(e)}")
+                if results.get('moderator_summary'):
+                    st.markdown(results['moderator_summary'])
+
+    except Exception as e:
+        st.error(f"Error displaying review results: {str(e)}")
+        logging.error(f"Review display error: {str(e)}")
 
 class ModeratorAgent:
     def __init__(self, model="gpt-4o"):
@@ -682,61 +741,79 @@ class ModeratorAgent:
         )
     
     def summarize_discussion(self, iterations: List[Dict[str, Any]]) -> str:
-        """Analyze the complete discussion history across all iterations."""
-        discussion_summary = "Complete Discussion History:\n\n"
-        
-        # Build comprehensive discussion history
-        for idx, iteration in enumerate(iterations, 1):
-            discussion_summary += f"\nIteration {idx}:\n"
-            
-            # Add reviews
-            for review in iteration['reviews']:
-                if not review.get('error', False):
-                    discussion_summary += f"\n{review['reviewer']}:\n{review['content']}\n"
-            
-            # Add dialogue and key points
-            if iteration.get('dialogue'):
-                discussion_summary += "\nDiscussion Summary:\n"
-                discussion_summary += iteration['dialogue'][0].get('key_points', '') + "\n"
-        
-        moderator_prompt = f"""As a moderator, analyze this complete discussion history across all iterations:
-
-{discussion_summary}
-
-Provide a comprehensive final analysis that:
-
-1. KEY POINTS OF AGREEMENT:
-   - Track how consensus was built across iterations
-   - Identify major agreements and their evolution
-   - Note when key agreements were reached
-
-2. POINTS OF CONTENTION:
-   - Analyze unresolved disagreements
-   - Examine how disagreements evolved or were resolved
-   - Identify root causes of persistent disagreements
-
-3. DISCUSSION EVOLUTION:
-   - Track how viewpoints changed across iterations
-   - Note key turning points in the discussion
-   - Identify what influenced opinion changes
-   - Analyze the effectiveness of the dialogue
-
-4. FINAL SYNTHESIS:
-   - Provide overall consensus view
-   - Summarize critical recommendations
-   - Identify clear next steps
-   - Note any remaining uncertainties
-   - Suggest future directions
-
-Format your response using these exact sections and maintain an objective, analytical perspective that considers the complete discussion history."""
-
+        """Analyze the complete discussion history across all iterations with improved error handling."""
         try:
-            response = self.model.invoke([HumanMessage(content=moderator_prompt)])
-            return response.content
-        except Exception as e:
-            logging.error(f"Error in moderation: {e}")
-            return f"Error generating moderation summary: {str(e)}"
+            if not iterations:
+                return "No iterations to analyze."
 
+            discussion_summary = "Complete Discussion History:\n\n"
+            
+            # Build comprehensive discussion history
+            for idx, iteration in enumerate(iterations, 1):
+                discussion_summary += f"\nIteration {idx}:\n"
+                
+                # Add reviews
+                if iteration.get('reviews'):
+                    for review in iteration['reviews']:
+                        if not review.get('error', False):
+                            reviewer = review.get('reviewer', 'Unknown Reviewer')
+                            content = review.get('content', 'No content available')
+                            discussion_summary += f"\n{reviewer}:\n{content}\n"
+                
+                # Add dialogue and key points
+                if iteration.get('dialogue'):
+                    discussion_summary += "\nDiscussion Summary:\n"
+                    for dialogue in iteration['dialogue']:
+                        if isinstance(dialogue, dict):
+                            if dialogue.get('key_points'):
+                                discussion_summary += f"{dialogue['key_points']}\n"
+                            if dialogue.get('content'):
+                                discussion_summary += f"Detailed Discussion:\n{dialogue['content']}\n"
+
+            moderator_prompt = f"""As a moderator, analyze this complete discussion history across all iterations:
+
+    {discussion_summary}
+
+    Provide a comprehensive final analysis that:
+
+    1. KEY POINTS OF AGREEMENT:
+    - Track how consensus was built across iterations
+    - Identify major agreements and their evolution
+    - Note when key agreements were reached
+
+    2. POINTS OF CONTENTION:
+    - Analyze unresolved disagreements
+    - Examine how disagreements evolved or were resolved
+    - Identify root causes of persistent disagreements
+
+    3. DISCUSSION EVOLUTION:
+    - Track how viewpoints changed across iterations
+    - Note key turning points in the discussion
+    - Identify what influenced opinion changes
+    - Analyze the effectiveness of the dialogue
+
+    4. FINAL SYNTHESIS:
+    - Provide overall consensus view
+    - Summarize critical recommendations
+    - Identify clear next steps
+    - Note any remaining uncertainties
+    - Suggest future directions
+
+    Format your response using these exact sections and maintain an objective, analytical perspective that considers the complete discussion history."""
+
+            try:
+                response = self.model.invoke([HumanMessage(content=moderator_prompt)])
+                if not response or not hasattr(response, 'content'):
+                    raise ValueError("Invalid model response")
+                return response.content
+            except Exception as e:
+                logging.error(f"Error in moderation: {e}")
+                return f"Error generating moderation summary: {str(e)}"
+
+        except Exception as e:
+            logging.error(f"Error in discussion summary: {e}")
+            return f"Error analyzing discussion: {str(e)}"
+    
 class PresentationReviewer:
     def __init__(self, model="gpt-4o"):
         self.model = model
