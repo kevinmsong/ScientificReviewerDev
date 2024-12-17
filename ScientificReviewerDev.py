@@ -1532,6 +1532,9 @@ class ReviewManager:
         previous_iterations = []
         
         try:
+            # Debug logging
+            logging.info(f"Starting review process with config: {json.dumps(config, indent=2)}")
+            
             # Validate config and reviewer information
             if not config or not isinstance(config, dict):
                 raise ValueError("Invalid configuration")
@@ -1539,10 +1542,14 @@ class ReviewManager:
             if not config.get('reviewers') or not isinstance(config['reviewers'], list):
                 raise ValueError("No reviewers specified in configuration")
                 
-            # Validate each reviewer has required information
+            # Debug logging
+            logging.info(f"Found {len(config['reviewers'])} reviewers")
             for idx, reviewer in enumerate(config['reviewers']):
-                if not isinstance(reviewer, dict) or 'expertise' not in reviewer:
-                    raise ValueError(f"Invalid reviewer configuration for reviewer {idx + 1}")
+                logging.info(f"Reviewer {idx + 1}: {json.dumps(reviewer, indent=2)}")
+                if not isinstance(reviewer, dict):
+                    raise ValueError(f"Invalid reviewer format for reviewer {idx + 1}")
+                if 'expertise' not in reviewer:
+                    raise ValueError(f"Missing expertise for reviewer {idx + 1}")
 
             is_presentation = any(section.get('type') == 'slide' for section in sections)
             if is_presentation:
@@ -1551,12 +1558,14 @@ class ReviewManager:
             temperature = self._calculate_temperature(config.get('bias', 0))
             
             for iteration in range(config['iterations']):
+                logging.info(f"Starting iteration {iteration + 1}")
                 iteration_reviews = []
                 previous_context = self._create_previous_context(iterations)
                 
                 # Generate reviews
-                for reviewer in config['reviewers']:
+                for rev_idx, reviewer in enumerate(config['reviewers']):
                     try:
+                        logging.info(f"Processing reviewer {rev_idx + 1}: {reviewer.get('expertise', 'Unknown')}")
                         model = self.model_config.get(config['doc_type'], "gpt-4o")
                         
                         if is_presentation:
@@ -1590,9 +1599,13 @@ class ReviewManager:
                                 previous_context=previous_context
                             )
                             
-                            # Ensure review has required fields
+                            # Validate review output
                             if not review.get('reviewer'):
                                 review['reviewer'] = reviewer['expertise']
+                            if not review.get('content'):
+                                raise ValueError("Empty review content")
+                                
+                            logging.info(f"Generated review for {review['reviewer']}")
                         
                         iteration_reviews.append(review)
                         
@@ -1606,25 +1619,38 @@ class ReviewManager:
                             'error': True
                         })
                 
+                logging.info(f"Generated {len(iteration_reviews)} reviews for iteration {iteration + 1}")
+                
                 # Generate reviewer dialogue that builds on previous discussions
                 if not is_presentation and iteration_reviews:
                     try:
-                        dialogue = self._generate_reviewer_dialogue(
-                            reviews=iteration_reviews,
-                            previous_iterations=previous_iterations,
-                            config=config
-                        )
+                        # Validate reviews before dialogue generation
+                        valid_reviews = [r for r in iteration_reviews if not r.get('error', False)]
+                        logging.info(f"Found {len(valid_reviews)} valid reviews for dialogue")
                         
-                        current_iteration = {
-                            'iteration_number': iteration + 1,
-                            'reviews': iteration_reviews,
-                            'dialogue': [dialogue] if dialogue and not dialogue.get('error') else []
-                        }
-                        
+                        if valid_reviews:
+                            dialogue = self._generate_reviewer_dialogue(
+                                reviews=valid_reviews,
+                                previous_iterations=previous_iterations,
+                                config=config
+                            )
+                            
+                            if dialogue and not dialogue.get('error'):
+                                current_iteration = {
+                                    'iteration_number': iteration + 1,
+                                    'reviews': iteration_reviews,
+                                    'dialogue': [dialogue]
+                                }
+                            else:
+                                raise ValueError("Invalid dialogue generated")
+                        else:
+                            raise ValueError("No valid reviews for dialogue generation")
+                            
                         iterations.append(current_iteration)
                         previous_iterations = iterations.copy()
                     except Exception as e:
-                        logging.error(f"Error generating dialogue: {str(e)}")
+                        error_msg = f"Error generating dialogue: {str(e)}"
+                        logging.error(error_msg)
                         current_iteration = {
                             'iteration_number': iteration + 1,
                             'reviews': iteration_reviews,
@@ -1639,12 +1665,13 @@ class ReviewManager:
             
             # Generate final analysis considering all iterations
             try:
+                logging.info("Generating final analysis")
                 moderator_summary = self.moderator.summarize_discussion(iterations)
             except Exception as e:
                 logging.error(f"Error generating moderator summary: {str(e)}")
                 moderator_summary = f"Error generating final analysis: {str(e)}"
             
-            return {
+            result = {
                 'iterations': iterations,
                 'moderator_summary': moderator_summary,
                 'config': config,
@@ -1652,6 +1679,9 @@ class ReviewManager:
                 'doc_type': config['doc_type'],
                 'is_presentation': is_presentation
             }
+            
+            logging.info("Review process completed successfully")
+            return result
             
         except Exception as e:
             logging.error(f"Error in review process: {str(e)}")
