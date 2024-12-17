@@ -1503,34 +1503,55 @@ def main():
     
     # Reviewer expertise selection
     reviewers = []
-    for i in range(num_reviewers):
-        st.markdown(f"### Reviewer {i+1}")
-        col1, col2 = st.columns(2)
-        
-        with col1:
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("### Select Expertise Areas")
+        for i in range(num_reviewers):
+            st.markdown(f"#### Reviewer {i+1}")
             expertise_category = st.selectbox(
                 "Expertise Category",
                 list(EXPERTISE_OPTIONS.keys()),
                 key=f"cat_{i}"
             )
-        
-        with col2:
             expertise = st.selectbox(
                 "Specific Expertise",
                 EXPERTISE_OPTIONS[expertise_category],
                 key=f"exp_{i}"
             )
-        
-        reviewers.append({"expertise": expertise})
+            reviewers.append({"expertise": expertise})
+    
+    with col2:
+        if doc_type == "Grant" and scoring_system == "nih":
+            st.markdown("### NIH Review Criteria")
+            st.info("""
+            Reviews will follow NIH criteria:
+            
+            1. **Significance**
+               - Important problem/critical barrier assessment
+               - Scientific/technical/clinical advancement potential
+               - Impact on concepts/methods/technologies
+            
+            2. **Innovation**
+               - Challenge to research paradigms
+               - Novel concepts/approaches/methods
+               - State-of-the-art advancement
+            
+            3. **Approach**
+               - Strategy and methodology assessment
+               - Risk management and alternatives
+               - Timeline and resource feasibility
+            """)
     
     # Document upload
     st.markdown("## Document Upload")
     file_type_help = """
+    Supported formats:
     - PDF files: Papers, Grants, and Posters
     - PowerPoint (.pptx): Presentations for slide-by-slide review
     """
     uploaded_file = st.file_uploader(
-        "Upload Document", "Upload Document",
+        "Upload Document",
         type=["pdf", "pptx"],
         help=file_type_help
     )
