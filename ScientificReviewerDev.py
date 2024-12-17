@@ -1287,30 +1287,30 @@ class ReviewManager:
             # Create dialogue prompt
             dialogue_prompt = f"""Based on the following reviews and previous discussions, generate a detailed dialogue between the reviewers. This is iteration {current_iteration}.
 
-    Previous Context:
-    {dialogue_context}
+Previous Context:
+{dialogue_context}
 
-    Current Reviews:
-    """
+Current Reviews:
+"""
             for review in reviews:
                 if not review.get('error', False):
                     dialogue_prompt += f"\n{review['reviewer']}:\n{review['content']}\n"
 
             dialogue_prompt += """
-    Generate a natural dialogue that:
-    1. References and builds upon previous discussions and agreements
-    2. Addresses any unresolved points from earlier iterations
-    3. Works toward consensus where possible
-    4. Maintains individual expertise perspectives
-    5. Considers both technical and broader impacts
+Generate a natural dialogue that:
+1. References and builds upon previous discussions and agreements
+2. Addresses any unresolved points from earlier iterations
+3. Works toward consensus where possible
+4. Maintains individual expertise perspectives
+5. Considers both technical and broader impacts
 
-    Track key points of:
-    - Agreements reached
-    - Remaining disagreements
-    - New insights or perspectives
-    - Action items or recommendations
+Track key points of:
+- Agreements reached
+- Remaining disagreements
+- New insights or perspectives
+- Action items or recommendations
 
-    Format as a detailed conversation with clear speaker labels and logical progression."""
+Format as a detailed conversation with clear speaker labels and logical progression."""
 
             # Generate dialogue
             agent = ChatOpenAI(
@@ -1323,15 +1323,15 @@ class ReviewManager:
             
             # Generate summary of key points
             summary_prompt = f"""Based on this dialogue:
-    {response.content}
+{response.content}
 
-    Provide a concise summary of:
-    1. Key agreements reached
-    2. Remaining points of contention
-    3. New insights or perspectives gained
-    4. Specific recommendations or action items
+Provide a concise summary of:
+1. Key agreements reached
+2. Remaining points of contention
+3. New insights or perspectives gained
+4. Specific recommendations or action items
 
-    Focus on how this discussion evolved from previous iterations and what progress was made."""
+Focus on how this discussion evolved from previous iterations and what progress was made."""
 
             summary_response = agent.invoke([HumanMessage(content=summary_prompt)])
             
@@ -1529,9 +1529,9 @@ class ReviewManager:
         return context
 
     def process_review(self, content: str, sections: List[Dict[str, Any]], config: Dict[str, Any]) -> Dict[str, Any]:
-        """Process document review with multiple iterations, dialogue, and moderation."""
+        """Process document review with iterative discussions and comprehensive final analysis."""
         iterations = []
-        all_reviews = []
+        previous_iterations = []
         
         try:
             is_presentation = any(section.get('type') == 'slide' for section in sections)
@@ -1542,9 +1542,9 @@ class ReviewManager:
             
             for iteration in range(config['iterations']):
                 iteration_reviews = []
-                previous_context = self._create_previous_context(all_reviews)
+                previous_context = self._create_previous_context(iterations)
                 
-                # Initial reviews
+                # Generate reviews
                 for reviewer in config['reviewers']:
                     try:
                         model = self.model_config.get(config['doc_type'], "gpt-4o")
@@ -1581,7 +1581,6 @@ class ReviewManager:
                             )
                         
                         iteration_reviews.append(review)
-                        all_reviews.append(review)
                         
                     except Exception as e:
                         logging.error(f"Error in review by {reviewer['expertise']}: {str(e)}")
@@ -1592,21 +1591,29 @@ class ReviewManager:
                             'error': True
                         })
                 
-                # Generate reviewer dialogue
-                if not is_presentation:  # Skip dialogue for presentations
-                    dialogue = self._generate_reviewer_dialogue(iteration_reviews, config)
+                # Generate reviewer dialogue that builds on previous discussions
+                if not is_presentation:
+                    dialogue = self._generate_reviewer_dialogue(
+                        reviews=iteration_reviews,
+                        previous_iterations=previous_iterations,
+                        config=config
+                    )
                     
-                    iterations.append({
+                    current_iteration = {
                         'iteration_number': iteration + 1,
                         'reviews': iteration_reviews,
-                        'dialogue': dialogue
-                    })
+                        'dialogue': [dialogue]
+                    }
+                    
+                    iterations.append(current_iteration)
+                    previous_iterations = iterations.copy()  # Update previous iterations
                 else:
                     iterations.append({
                         'iteration_number': iteration + 1,
                         'reviews': iteration_reviews
                     })
             
+            # Generate final analysis considering all iterations
             moderator_summary = self.moderator.summarize_discussion(iterations)
             
             return {
