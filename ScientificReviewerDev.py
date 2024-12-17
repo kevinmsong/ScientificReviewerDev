@@ -994,7 +994,7 @@ class ReviewManager:
             "Paper": "gpt-4o",
             "Grant": "gpt-4o",
             "Poster": "gpt-4o",
-            "Presentation": "gpt-4o""Presentation": "gpt-4o""Presentation": "gpt-4o""Presentation": "gpt-4o"
+            "Presentation": "gpt-4o"
         }
         self.moderator = ModeratorAgent()
     
