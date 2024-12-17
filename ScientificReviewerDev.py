@@ -267,43 +267,55 @@ def extract_pptx_content(pptx_file) -> tuple[str, List[Dict[str, Any]]]:
                 logging.error(f"Failed to remove temporary file: {str(e)}")
 
 def parse_review_sections(content: str) -> Dict[str, str]:
-    """Parse review content into structured sections with enhanced formatting."""
+    """
+    Enhanced parsing of review content with more flexible section extraction.
+    """
     sections = {}
     
-    # Define section markers and their keys
-    section_markers = {
-        'RESPONSE TO PREVIOUS REVIEWS': 'response',
-        'SIGNIFICANCE EVALUATION': 'significance',
-        'INNOVATION ASSESSMENT': 'innovation',
-        'APPROACH ANALYSIS': 'approach',
-        'SCORING': 'scoring',
-        'RECOMMENDATIONS': 'recommendations'
-    }
+    # Define section markers with more flexible matching
+    section_markers = [
+        ('response', r'RESPONSE\s*TO\s*PREVIOUS\s*REVIEWS?', ['next_section', 'SIGNIFICANCE', 'INNOVATION', 'APPROACH']),
+        ('significance', r'SIGNIFICANCE\s*EVALUATION', ['INNOVATION', 'APPROACH', 'SCORING']),
+        ('innovation', r'INNOVATION\s*ASSESSMENT', ['APPROACH', 'SIGNIFICANCE', 'SCORING']),
+        ('approach', r'APPROACH\s*ANALYSIS', ['SCORING', 'SIGNIFICANCE', 'INNOVATION']),
+        ('scoring', r'SCORING', ['RECOMMENDATIONS']),
+        ('recommendations', r'RECOMMENDATIONS', [])
+    ]
     
-    # Find each section's content
-    for marker, key in section_markers.items():
-        if marker in content:
-            start = content.find(marker)
-            # Find the start of the next section or end of content
-            next_section_start = float('inf')
-            for other_marker in section_markers:
-                if other_marker != marker:
-                    pos = content.find(other_marker, start + len(marker))
-                    if pos != -1 and pos < next_section_start:
-                        next_section_start = pos
+    # Convert content to a single string and normalize newlines
+    if not isinstance(content, str):
+        content = str(content)
+    content = content.replace('\r\n', '\n')
+    
+    for key, marker_pattern, next_markers in section_markers:
+        try:
+            # Find the start of the section
+            marker_match = re.search(marker_pattern, content, re.IGNORECASE | re.MULTILINE)
+            if not marker_match:
+                continue
             
-            if next_section_start == float('inf'):
-                next_section_start = len(content)
+            start_pos = marker_match.end()
             
-            section_content = content[start + len(marker):next_section_start].strip()
+            # Find the end of the section
+            end_pos = len(content)
+            for next_marker in next_markers:
+                next_match = re.search(next_marker, content[start_pos:], re.IGNORECASE | re.MULTILINE)
+                if next_match:
+                    end_pos = start_pos + next_match.start()
+                    break
             
-            # Clean up the content
-            section_content = re.sub(r'\*\*(.*?)\*\*', r'\1', section_content)  # Remove bold markers
-            section_content = section_content.replace('*.', '•')  # Replace asterisk bullets
-            section_content = re.sub(r'\n{3,}', '\n\n', section_content)  # Remove extra newlines
+            # Extract section content
+            section_content = content[start_pos:end_pos].strip()
+            
+            # Basic cleaning
+            section_content = re.sub(r'\n{3,}', '\n\n', section_content)
+            section_content = re.sub(r'^\s*\d+\.\s*', '', section_content, flags=re.MULTILINE)
             
             if section_content:
                 sections[key] = section_content
+        
+        except Exception as e:
+            logging.error(f"Error parsing {key} section: {str(e)}")
     
     return sections
 
@@ -366,22 +378,16 @@ def parse_slide_review(content: str) -> Dict[str, str]:
     return sections
 
 def display_review_sections(sections: Dict[str, str], is_nih: bool = False):
-    """Display review sections with enhanced formatting."""
+    """
+    Enhanced display of review sections with more robust parsing.
+    """
+    # Define section order and display parameters
     section_order = [
         'response', 'significance', 'innovation', 
         'approach', 'scoring', 'recommendations'
     ]
     
-    icons = {
-        'response': '💬',
-        'significance': '🎯',
-        'innovation': '💡',
-        'approach': '🔍',
-        'scoring': '⭐',
-        'recommendations': '📋'
-    }
-    
-    titles = {
+    section_titles = {
         'response': 'Response to Previous Reviews',
         'significance': 'Significance Evaluation',
         'innovation': 'Innovation Assessment',
@@ -390,85 +396,64 @@ def display_review_sections(sections: Dict[str, str], is_nih: bool = False):
         'recommendations': 'Recommendations'
     }
     
+    section_icons = {
+        'response': '💬',
+        'significance': '🎯',
+        'innovation': '💡',
+        'approach': '🔍',
+        'scoring': '⭐',
+        'recommendations': '📋'
+    }
+    
+    # Display sections in order
     for section in section_order:
-        if section in sections:
-            content = sections[section]
+        if section not in sections:
+            continue
+        
+        content = sections[section]
+        
+        # Display section header
+        st.markdown(f"#### {section_icons.get(section, '')} {section_titles.get(section, section.title())}")
+        
+        # Special handling for different section types
+        if section == 'scoring':
+            # Parse and display scores
+            score_pattern = r'(.*?):\s*\[(\d+)\]'
+            scores = re.findall(score_pattern, content, re.MULTILINE | re.DOTALL)
             
-            st.markdown(f"### {icons[section]} {titles[section]}")
+            for category, score in scores:
+                score = int(score)
+                st.markdown(f"**{category.strip()}:** {'★' * score}{'☆' * (5 - score)}")
+        
+        elif section == 'recommendations':
+            # Split recommendations
+            required = []
+            optional = []
             
-            if is_nih and section in ['significance', 'innovation', 'approach']:
-                # Format NIH-specific sections
-                lines = content.split('\n')
-                current_subsection = None
-                subsection_content = []
-                
-                for line in lines:
-                    if re.match(r'^\d+\.', line):
-                        if current_subsection and subsection_content:
-                            st.markdown(f"**{current_subsection}**")
-                            for point in subsection_content:
-                                if point.strip():
-                                    st.markdown(f"- {point.strip()}")
-                            st.markdown("---")
-                        current_subsection = line.strip()
-                        subsection_content = []
-                    elif line.strip():
-                        subsection_content.append(line)
-                
-                if current_subsection and subsection_content:
-                    st.markdown(f"**{current_subsection}**")
-                    for point in subsection_content:
-                        if point.strip():
-                            st.markdown(f"- {point.strip()}")
-                    st.markdown("---")
-                
-            elif section == 'scoring':
-                # Format scoring section
-                scores = re.findall(r'([^:]+):\s*\[(\d+)\][^\n]*(?:\n|$)', content)
-                for category, score in scores:
-                    category = category.strip()
-                    if is_nih:
-                        st.markdown(f"**{category}:** {score}/9")
-                        # Extract and display score justification
-                        justification = re.search(f"{category}:.*?\\[{score}\\](.*?)(?=\\n\\w|$)", content, re.DOTALL)
-                        if justification:
-                            st.markdown(justification.group(1).strip())
-                    else:
-                        st.markdown(f"**{category}:** {'★' * int(score)}{'☆' * (5 - int(score))}")
-                st.markdown("---")
-                
-            elif section == 'recommendations':
-                # Format recommendations section
-                required = []
-                optional = []
-                current_list = None
-                
-                for line in content.split('\n'):
-                    if 'Critical changes needed:' in line:
-                        current_list = required
-                    elif 'Suggested improvements:' in line:
-                        current_list = optional
-                    elif line.strip().startswith('-') and current_list is not None:
-                        current_list.append(line.strip()[1:].strip())
-                
-                if required:
-                    st.markdown("**Required Changes:**")
-                    for item in required:
-                        st.markdown(f"- {item}")
-                
-                if optional:
-                    st.markdown("**Optional Improvements:**")
-                    for item in optional:
-                        st.markdown(f"- {item}")
-                st.markdown("---")
-                
-            else:
-                # Format regular sections
-                paragraphs = content.split('\n\n')
-                for paragraph in paragraphs:
-                    if paragraph.strip():
-                        st.markdown(paragraph.strip())
-                st.markdown("---")
+            # Try to identify required and optional changes
+            recommendation_match = re.search(r'Critical changes needed:(.*?)Suggested improvements?:(.*)', 
+                                             content, re.DOTALL | re.IGNORECASE)
+            
+            if recommendation_match:
+                required = [r.strip() for r in recommendation_match.group(1).split('\n') if r.strip()]
+                optional = [r.strip() for r in recommendation_match.group(2).split('\n') if r.strip()]
+            
+            if required:
+                st.markdown("**Required Changes:**")
+                for change in required:
+                    st.markdown(f"- {change}")
+            
+            if optional:
+                st.markdown("**Optional Improvements:**")
+                for change in optional:
+                    st.markdown(f"- {change}")
+        
+        else:
+            # Default section display
+            st.markdown(content)
+        
+        # Separator between sections
+        st.markdown("---")
 
 def format_analysis_section(title: str, content: str) -> str:
     """Format a section of the analysis with clean styling."""
@@ -602,15 +587,13 @@ def parse_nih_review_sections(content: str) -> Dict[str, str]:
     return sections
 
 def display_review_results(results: Dict[str, Any]):
-    """Enhanced display of review results with comprehensive iteration tracking."""
+    """
+    Comprehensive review results display with enhanced error handling.
+    """
     try:
-        # Validate results structure
-        if not results:
+        # Validate results
+        if not results or 'iterations' not in results:
             st.warning("No review results available.")
-            return
-        
-        if 'iterations' not in results or not results['iterations']:
-            st.warning("No review iterations found.")
             return
         
         # Determine review type
@@ -618,89 +601,66 @@ def display_review_results(results: Dict[str, Any]):
             results.get('config', {}).get('doc_type') == "Grant" and 
             results.get('config', {}).get('scoring') == "nih"
         )
-        is_presentation = results.get('is_presentation', False)
         
         # Create tabs for iterations
         tab_titles = [f"Iteration {i+1}" for i in range(len(results['iterations']))]
         tab_titles.append("Final Analysis")
         tabs = st.tabs(tab_titles)
         
-        # Display each iteration's reviews
+        # Display each iteration
         for idx, (tab, iteration) in enumerate(zip(tabs[:-1], results['iterations'])):
             with tab:
                 st.markdown(f"## Iteration {idx + 1} Reviews")
                 
-                # Display reviews for this iteration
+                # Check if reviews exist
                 if not iteration.get('reviews'):
                     st.warning("No reviews found for this iteration.")
                     continue
                 
-                for review_idx, review in enumerate(iteration['reviews'], 1):
-                    # Handle potential error in review
+                # Process each review
+                for review in iteration['reviews']:
+                    # Skip error reviews
                     if review.get('error'):
-                        st.error(f"Review {review_idx} Error: {review.get('content', 'Unknown error')}")
+                        st.error(f"Review error: {review.get('content', 'Unknown error')}")
                         continue
                     
-                    # Determine review display method based on document type
-                    if is_presentation or review.get('is_presentation'):
-                        # Presentation review display
-                        st.markdown(f"### 🎤 Review by {review.get('reviewer', 'Unknown')}")
-                        
-                        # Overall presentation review
-                        st.markdown("#### Overall Presentation Assessment")
-                        st.write(review.get('content', 'No overall assessment available'))
-                        
-                        # Slide-by-slide reviews
-                        if review.get('slide_reviews'):
-                            st.markdown("#### Slide-by-Slide Analysis")
-                            for slide_review in review['slide_reviews']:
-                                st.markdown(f"**Slide {slide_review.get('slide_number', 'N/A')}**")
-                                st.write(slide_review.get('content', 'No detailed review'))
+                    # Display reviewer and timestamp
+                    st.markdown(f"### 📝 Review by {review.get('reviewer', 'Unknown')}")
                     
-                    else:
-                        # Standard document review
-                        st.markdown(f"### 📝 Review by {review.get('reviewer', 'Unknown')}")
+                    # Parse and display review sections
+                    try:
+                        # Check if review content exists
+                        if not review.get('content'):
+                            st.warning("Empty review content.")
+                            continue
                         
-                        # Parse review sections based on document type
+                        # Parse review sections
                         if is_nih:
-                            sections = parse_nih_review_sections(review.get('content', ''))
+                            sections = parse_nih_review_sections(review['content'])
                         else:
-                            sections = parse_review_sections(review.get('content', ''))
+                            sections = parse_review_sections(review['content'])
                         
                         # Display parsed sections
                         display_review_sections(sections, is_nih)
                     
-                    # Display review timestamp
+                    except Exception as e:
+                        st.error(f"Error parsing review: {str(e)}")
+                    
+                    # Display timestamp
                     st.markdown(f"*Reviewed at: {review.get('timestamp', 'Unknown time')}*")
                     st.markdown("---")
-                
-                # Display iteration dialogue if available
-                if iteration.get('dialogue'):
-                    st.markdown("## Reviewer Dialogue")
-                    for dialogue_idx, dialogue in enumerate(iteration['dialogue'], 1):
-                        st.markdown(f"### Discussion Round {dialogue_idx}")
-                        if dialogue.get('error'):
-                            st.error(dialogue.get('content', 'Unknown dialogue error'))
-                        else:
-                            # Display dialogue content and key points
-                            st.write(dialogue.get('content', 'No dialogue content'))
-                            if dialogue.get('key_points'):
-                                st.markdown("#### Key Discussion Points")
-                                st.write(dialogue.get('key_points', ''))
         
         # Final analysis tab
         with tabs[-1]:
             st.markdown("## Final Analysis")
             if results.get('moderator_summary'):
-                # Use existing moderator section display
                 display_moderator_sections(results['moderator_summary'])
             else:
                 st.warning("No final analysis available.")
-
+    
     except Exception as e:
         st.error(f"Error displaying review results: {str(e)}")
         logging.error(f"Review display error: {str(e)}")
-        logging.exception("Full error details:")
 
 class ModeratorAgent:
     def __init__(self, model="gpt-4o"):
@@ -1755,7 +1715,7 @@ def main():
                - Impact on concepts/methods/technologies
             
             2. **Innovation**
-               - Challenge to research paradigms
+               - Challenge to research paradigms# Pre-configured expertise options
                - Novel concepts/approaches/methods
                - State-of-the-art advancement
             
