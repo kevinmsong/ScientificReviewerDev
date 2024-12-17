@@ -1817,7 +1817,7 @@ def main():
     uploaded_file = st.file_uploader(
         "Upload Document",
         type=["pdf", "pptx"],
-        help=file_type_helphelp=file_type_help
+        help=file_type_help
     )
     
     if uploaded_file:
