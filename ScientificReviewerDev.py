@@ -586,80 +586,71 @@ def parse_nih_review_sections(content: str) -> Dict[str, str]:
 
 def display_review_results(results: Dict[str, Any]):
     """
-    Comprehensive review results display with extensive debugging.
+    Comprehensive display of review results with explicit content rendering.
     """
-    # Emergency logging and display
-    st.write("Raw Results Structure:")
-    st.json(results)
-
     try:
-        # Explicit validation and logging
-        if not results:
-            st.error("Results are empty")
+        # Validate results
+        if not results or 'iterations' not in results:
+            st.warning("No review results available.")
             return
         
-        if 'iterations' not in results:
-            st.error("No 'iterations' key in results")
-            return
+        # Determine review type
+        is_nih = (
+            results.get('config', {}).get('doc_type') == "Grant" and 
+            results.get('config', {}).get('scoring') == "nih"
+        )
         
+        # Create tabs for iterations
         iterations = results.get('iterations', [])
-        st.write(f"Number of Iterations: {len(iterations)}")
-        
-        # Create tabs with backup display
         tab_titles = [f"Iteration {i+1}" for i in range(len(iterations))]
         tab_titles.append("Final Analysis")
         tabs = st.tabs(tab_titles)
         
-        # Detailed iteration processing
+        # Display each iteration
         for idx, (tab, iteration) in enumerate(zip(tabs[:-1], iterations)):
             with tab:
-                st.markdown(f"## Iteration {idx + 1}")
+                st.markdown(f"## Iteration {idx + 1} Reviews")
                 
-                # Explicit reviews display
+                # Process reviews
                 reviews = iteration.get('reviews', [])
-                st.write(f"Number of Reviews in Iteration {idx + 1}: {len(reviews)}")
-                
-                if not reviews:
-                    st.warning("No reviews found in this iteration")
-                    continue
-                
-                for review_idx, review in enumerate(reviews, 1):
-                    st.markdown(f"### Review {review_idx}")
-                    
-                    # Display raw review content
-                    st.write("Raw Review Content:")
-                    st.json(review)
-                    
-                    # Error handling
+                for review in reviews:
+                    # Skip error reviews
                     if review.get('error'):
-                        st.error(f"Review Error: {review.get('content', 'Unknown error')}")
+                        st.error(f"Review error: {review.get('content', 'Unknown error')}")
                         continue
                     
-                    # Basic review details
-                    st.markdown(f"**Reviewer:** {review.get('reviewer', 'Unknown')}")
-                    st.markdown(f"**Timestamp:** {review.get('timestamp', 'Unknown time')}")
+                    # Display reviewer and timestamp
+                    st.markdown(f"### 📝 Review by {review.get('reviewer', 'Unknown')}")
+                    st.markdown(f"*Reviewed at: {review.get('timestamp', 'Unknown time')}*")
                     
-                    # Content display
-                    content = review.get('content', 'No content available')
-                    st.markdown("**Review Content:**")
-                    st.write(content)
+                    # Display full review content
+                    st.markdown(review.get('content', 'No content available'))
+                    st.markdown("---")
                 
-                # Dialogue display
+                # Process dialogue
                 dialogues = iteration.get('dialogue', [])
-                st.write(f"Number of Dialogues: {len(dialogues)}")
-                
-                for dialogue_idx, dialogue in enumerate(dialogues, 1):
-                    st.markdown(f"### Dialogue {dialogue_idx}")
-                    st.json(dialogue)
+                if dialogues:
+                    st.markdown("## Reviewer Dialogue")
+                    for dialogue in dialogues:
+                        # Display full dialogue content
+                        st.markdown("### Dialogue")
+                        st.markdown(dialogue.get('content', 'No dialogue content'))
+                        
+                        # Display key points if available
+                        if dialogue.get('key_points'):
+                            st.markdown("#### Key Points")
+                            st.markdown(dialogue.get('key_points', ''))
+                        
+                        st.markdown("---")
         
         # Final analysis tab
         with tabs[-1]:
             st.markdown("## Final Analysis")
             moderator_summary = results.get('moderator_summary', 'No summary available')
-            st.write(moderator_summary)
+            st.markdown(moderator_summary)
     
     except Exception as e:
-        st.error(f"Critical error in display: {str(e)}")
+        st.error(f"Error displaying review results: {str(e)}")
         logging.error(f"Review display error: {str(e)}")
         logging.exception("Full error details:")
 
