@@ -1506,23 +1506,32 @@ class ReviewManager:
         """Calculate temperature based on reviewer bias."""
         return max(0.0, min(1.0, 0.7 + (bias * 0.1)))
 
-    def _create_previous_context(self, reviews: List[Dict[str, Any]]) -> str:
-        """Create context from previous reviews."""
-        if not reviews:
+    def _create_previous_context(self, iterations: List[Dict[str, Any]]) -> str:
+        """Create context from previous reviews with proper reviewer handling."""
+        if not iterations:
             return ""
             
         context = "\nPrevious reviews:\n"
-        for review in reviews:
-            if not review.get('error', False):
-                if review.get('is_presentation', False):
-                    context += f"\n{review['reviewer']} Overall Assessment:\n{review['content']}\n"
-                    context += "\nKey points from slides:\n"
-                    for slide_review in review.get('slide_reviews', []):
-                        if not slide_review.get('error'):
-                            context += f"Slide {slide_review['slide_number']}: "
-                            context += f"{'; '.join(slide_review.get('key_points', []))}\n"
-                else:
-                    context += f"\n{review['reviewer']}:\n{review['content']}\n"
+        for iteration in iterations:
+            if iteration.get('reviews'):
+                for review in iteration['reviews']:
+                    if not review.get('error', False) and review.get('reviewer') and review.get('content'):
+                        if review.get('is_presentation', False):
+                            context += f"\n{review['reviewer']} Overall Assessment:\n{review['content']}\n"
+                            if review.get('slide_reviews'):
+                                context += "\nKey points from slides:\n"
+                                for slide_review in review['slide_reviews']:
+                                    if not slide_review.get('error'):
+                                        context += f"Slide {slide_review['slide_number']}: "
+                                        context += f"{'; '.join(slide_review.get('key_points', []))}\n"
+                        else:
+                            context += f"\n{review['reviewer']}:\n{review['content']}\n"
+                            
+                if iteration.get('dialogue'):
+                    context += "\nDiscussion Summary:\n"
+                    for dialogue in iteration['dialogue']:
+                        if isinstance(dialogue, dict) and dialogue.get('key_points'):
+                            context += f"{dialogue['key_points']}\n"
         
         return context
 
@@ -1532,25 +1541,16 @@ class ReviewManager:
         previous_iterations = []
         
         try:
-            # Debug logging
-            logging.info(f"Starting review process with config: {json.dumps(config, indent=2)}")
-            
             # Validate config and reviewer information
             if not config or not isinstance(config, dict):
                 raise ValueError("Invalid configuration")
                 
             if not config.get('reviewers') or not isinstance(config['reviewers'], list):
                 raise ValueError("No reviewers specified in configuration")
-                
-            # Debug logging
-            logging.info(f"Found {len(config['reviewers'])} reviewers")
-            for idx, reviewer in enumerate(config['reviewers']):
-                logging.info(f"Reviewer {idx + 1}: {json.dumps(reviewer, indent=2)}")
-                if not isinstance(reviewer, dict):
-                    raise ValueError(f"Invalid reviewer format for reviewer {idx + 1}")
-                if 'expertise' not in reviewer:
-                    raise ValueError(f"Missing expertise for reviewer {idx + 1}")
-
+            
+            # Store original reviewers for reuse across iterations
+            reviewers = config['reviewers']
+            
             is_presentation = any(section.get('type') == 'slide' for section in sections)
             if is_presentation:
                 config['doc_type'] = "Presentation"
@@ -1562,10 +1562,10 @@ class ReviewManager:
                 iteration_reviews = []
                 previous_context = self._create_previous_context(iterations)
                 
-                # Generate reviews
-                for rev_idx, reviewer in enumerate(config['reviewers']):
+                # Generate reviews using original reviewer list
+                for rev_idx, reviewer in enumerate(reviewers):
                     try:
-                        logging.info(f"Processing reviewer {rev_idx + 1}: {reviewer.get('expertise', 'Unknown')}")
+                        logging.info(f"Processing reviewer {rev_idx + 1}: {reviewer['expertise']}")
                         model = self.model_config.get(config['doc_type'], "gpt-4o")
                         
                         if is_presentation:
@@ -1598,30 +1598,25 @@ class ReviewManager:
                                 iteration=iteration + 1,
                                 previous_context=previous_context
                             )
-                            
-                            # Validate review output
-                            if not review.get('reviewer'):
-                                review['reviewer'] = reviewer['expertise']
-                            if not review.get('content'):
-                                raise ValueError("Empty review content")
-                                
-                            logging.info(f"Generated review for {review['reviewer']}")
+                        
+                        # Ensure reviewer information is present
+                        if not review.get('reviewer'):
+                            review['reviewer'] = reviewer['expertise']
                         
                         iteration_reviews.append(review)
+                        logging.info(f"Generated review for {review['reviewer']}")
                         
                     except Exception as e:
-                        error_msg = f"Error in review by {reviewer.get('expertise', 'Unknown')}: {str(e)}"
+                        error_msg = f"Error in review by {reviewer['expertise']}: {str(e)}"
                         logging.error(error_msg)
                         iteration_reviews.append({
-                            'reviewer': reviewer.get('expertise', 'Unknown'),
+                            'reviewer': reviewer['expertise'],
                             'content': error_msg,
                             'timestamp': datetime.now().isoformat(),
                             'error': True
                         })
                 
-                logging.info(f"Generated {len(iteration_reviews)} reviews for iteration {iteration + 1}")
-                
-                # Generate reviewer dialogue that builds on previous discussions
+                # Generate reviewer dialogue
                 if not is_presentation and iteration_reviews:
                     try:
                         # Validate reviews before dialogue generation
@@ -1635,35 +1630,39 @@ class ReviewManager:
                                 config=config
                             )
                             
-                            if dialogue and not dialogue.get('error'):
-                                current_iteration = {
-                                    'iteration_number': iteration + 1,
-                                    'reviews': iteration_reviews,
-                                    'dialogue': [dialogue]
-                                }
-                            else:
-                                raise ValueError("Invalid dialogue generated")
+                            current_iteration = {
+                                'iteration_number': iteration + 1,
+                                'reviews': iteration_reviews,
+                                'dialogue': [dialogue] if dialogue and not dialogue.get('error') else [],
+                                'reviewers': [r['expertise'] for r in reviewers]  # Store reviewer info
+                            }
                         else:
-                            raise ValueError("No valid reviews for dialogue generation")
-                            
+                            current_iteration = {
+                                'iteration_number': iteration + 1,
+                                'reviews': iteration_reviews,
+                                'dialogue': [],
+                                'reviewers': [r['expertise'] for r in reviewers]
+                            }
+                        
                         iterations.append(current_iteration)
                         previous_iterations = iterations.copy()
+                        
                     except Exception as e:
-                        error_msg = f"Error generating dialogue: {str(e)}"
-                        logging.error(error_msg)
-                        current_iteration = {
+                        logging.error(f"Error generating dialogue: {str(e)}")
+                        iterations.append({
                             'iteration_number': iteration + 1,
                             'reviews': iteration_reviews,
-                            'dialogue': []
-                        }
-                        iterations.append(current_iteration)
+                            'dialogue': [],
+                            'reviewers': [r['expertise'] for r in reviewers]
+                        })
                 else:
                     iterations.append({
                         'iteration_number': iteration + 1,
-                        'reviews': iteration_reviews
+                        'reviews': iteration_reviews,
+                        'reviewers': [r['expertise'] for r in reviewers]
                     })
             
-            # Generate final analysis considering all iterations
+            # Generate final analysis
             try:
                 logging.info("Generating final analysis")
                 moderator_summary = self.moderator.summarize_discussion(iterations)
@@ -1671,17 +1670,15 @@ class ReviewManager:
                 logging.error(f"Error generating moderator summary: {str(e)}")
                 moderator_summary = f"Error generating final analysis: {str(e)}"
             
-            result = {
+            return {
                 'iterations': iterations,
                 'moderator_summary': moderator_summary,
                 'config': config,
                 'timestamp': datetime.now().isoformat(),
                 'doc_type': config['doc_type'],
-                'is_presentation': is_presentation
+                'is_presentation': is_presentation,
+                'reviewers': [r['expertise'] for r in reviewers]  # Store overall reviewer list
             }
-            
-            logging.info("Review process completed successfully")
-            return result
             
         except Exception as e:
             logging.error(f"Error in review process: {str(e)}")
