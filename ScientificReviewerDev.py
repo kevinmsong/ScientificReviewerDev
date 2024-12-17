@@ -1523,6 +1523,18 @@ class ReviewManager:
         previous_iterations = []
         
         try:
+            # Validate config and reviewer information
+            if not config or not isinstance(config, dict):
+                raise ValueError("Invalid configuration")
+                
+            if not config.get('reviewers') or not isinstance(config['reviewers'], list):
+                raise ValueError("No reviewers specified in configuration")
+                
+            # Validate each reviewer has required information
+            for idx, reviewer in enumerate(config['reviewers']):
+                if not isinstance(reviewer, dict) or 'expertise' not in reviewer:
+                    raise ValueError(f"Invalid reviewer configuration for reviewer {idx + 1}")
+
             is_presentation = any(section.get('type') == 'slide' for section in sections)
             if is_presentation:
                 config['doc_type'] = "Presentation"
@@ -1568,34 +1580,48 @@ class ReviewManager:
                                 iteration=iteration + 1,
                                 previous_context=previous_context
                             )
+                            
+                            # Ensure review has required fields
+                            if not review.get('reviewer'):
+                                review['reviewer'] = reviewer['expertise']
                         
                         iteration_reviews.append(review)
                         
                     except Exception as e:
-                        logging.error(f"Error in review by {reviewer.get('expertise', 'Unknown')}: {str(e)}")
+                        error_msg = f"Error in review by {reviewer.get('expertise', 'Unknown')}: {str(e)}"
+                        logging.error(error_msg)
                         iteration_reviews.append({
                             'reviewer': reviewer.get('expertise', 'Unknown'),
-                            'content': f"Review failed: {str(e)}",
+                            'content': error_msg,
                             'timestamp': datetime.now().isoformat(),
                             'error': True
                         })
                 
                 # Generate reviewer dialogue that builds on previous discussions
                 if not is_presentation and iteration_reviews:
-                    dialogue = self._generate_reviewer_dialogue(
-                        reviews=iteration_reviews,
-                        previous_iterations=previous_iterations,
-                        config=config
-                    )
-                    
-                    current_iteration = {
-                        'iteration_number': iteration + 1,
-                        'reviews': iteration_reviews,
-                        'dialogue': [dialogue]
-                    }
-                    
-                    iterations.append(current_iteration)
-                    previous_iterations = iterations.copy()
+                    try:
+                        dialogue = self._generate_reviewer_dialogue(
+                            reviews=iteration_reviews,
+                            previous_iterations=previous_iterations,
+                            config=config
+                        )
+                        
+                        current_iteration = {
+                            'iteration_number': iteration + 1,
+                            'reviews': iteration_reviews,
+                            'dialogue': [dialogue] if dialogue and not dialogue.get('error') else []
+                        }
+                        
+                        iterations.append(current_iteration)
+                        previous_iterations = iterations.copy()
+                    except Exception as e:
+                        logging.error(f"Error generating dialogue: {str(e)}")
+                        current_iteration = {
+                            'iteration_number': iteration + 1,
+                            'reviews': iteration_reviews,
+                            'dialogue': []
+                        }
+                        iterations.append(current_iteration)
                 else:
                     iterations.append({
                         'iteration_number': iteration + 1,
@@ -1603,7 +1629,11 @@ class ReviewManager:
                     })
             
             # Generate final analysis considering all iterations
-            moderator_summary = self.moderator.summarize_discussion(iterations)
+            try:
+                moderator_summary = self.moderator.summarize_discussion(iterations)
+            except Exception as e:
+                logging.error(f"Error generating moderator summary: {str(e)}")
+                moderator_summary = f"Error generating final analysis: {str(e)}"
             
             return {
                 'iterations': iterations,
