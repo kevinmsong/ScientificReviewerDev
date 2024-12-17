@@ -604,45 +604,120 @@ def parse_nih_review_sections(content: str) -> Dict[str, str]:
 def display_review_results(results: Dict[str, Any]):
     """Display review results with enhanced formatting."""
     try:
-        # [Previous validation code remains the same...]
+        if not results:
+            st.warning("No results to display.")
+            return
+            
+        if not isinstance(results, dict):
+            st.error("Invalid results format.")
+            return
+
+        st.markdown("## Review Results")
+        
+        if not results.get('iterations'):
+            st.warning("No review iterations available.")
+            return
+        
+        valid_iterations = [i for i in results['iterations'] if i['reviews']]
+        if not valid_iterations:
+            st.warning("No valid reviews to display.")
+            return
+        
+        is_nih = results.get('config', {}).get('doc_type') == "Grant" and \
+                 results.get('config', {}).get('scoring') == "nih"
+        
+        # Create tabs here before trying to use them
+        tab_titles = [f"Iteration {i+1}" for i in range(len(valid_iterations))]
+        tab_titles.append("Final Analysis")
+        tabs = st.tabs(tab_titles)
+        
+        # Display iterations
+        for idx, (tab, iteration) in enumerate(zip(tabs[:-1], valid_iterations)):
+            with tab:
+                st.markdown("### Reviews")
+                for review in iteration['reviews']:
+                    with st.expander(f"Review by {review.get('reviewer', 'Unknown')}", expanded=True):
+                        if review.get('error', False):
+                            st.error(review['content'])
+                        elif review.get('is_presentation', False):
+                            # Handle presentation reviews
+                            st.markdown("📊 Overall Presentation Analysis")
+                            st.markdown(clean_text_formatting(review['content']))
+                            st.markdown("---")
+                            
+                            if review.get('slide_reviews'):
+                                st.markdown("🎯 Slide-by-Slide Review")
+                                valid_slides = [sr for sr in review['slide_reviews'] if not sr.get('error')]
+                                
+                                if valid_slides:
+                                    slide_tabs = st.tabs([f"Slide {sr['slide_number']}" for sr in valid_slides])
+                                    
+                                    for slide_tab, slide_review in zip(slide_tabs, valid_slides):
+                                        with slide_tab:
+                                            sections = parse_slide_review(slide_review['content'])
+                                            for section_title, content in sections.items():
+                                                st.markdown(f"#### {section_title}")
+                                                st.markdown(clean_text_formatting(content))
+                                                st.markdown("---")
+                        else:
+                            # Handle regular document reviews
+                            if is_nih:
+                                sections = parse_nih_review_sections(review['content'])
+                            else:
+                                sections = parse_review_sections(review['content'])
+                            display_review_sections(sections, is_nih)
+                        
+                        st.markdown(f"*Reviewed at: {review.get('timestamp', 'Unknown time')}*")
+                
+                # Display reviewer dialogue
+                if iteration.get('dialogue'):
+                    st.markdown("### 💬 Reviewer Discussion")
+                    for msg_idx, dialogue in enumerate(iteration['dialogue'], 1):
+                        with st.expander(f"Discussion Round {msg_idx}", expanded=True):
+                            if dialogue.get('error', False):
+                                st.error(dialogue['content'])
+                            else:
+                                formatted_dialogue = format_dialogue(dialogue['content'])
+                                st.markdown(clean_text_formatting(formatted_dialogue))
+                                if dialogue.get('key_points'):
+                                    st.markdown("#### Key Points")
+                                    st.markdown(clean_text_formatting(dialogue['key_points']))
+                            st.markdown(f"*Discussion at: {dialogue.get('timestamp', 'Unknown time')}*")
+                    st.markdown("---")
         
         # Display final analysis in its own tab
         with tabs[-1]:
-            try:
-                if results.get('moderator_summary'):
-                    if is_nih:
-                        st.markdown("### NIH Review Summary")
-                    
-                    # Parse and display moderator sections without numbering
-                    sections = parse_moderator_sections(results['moderator_summary'])
-                    
-                    # Display each section with clean formatting and no numbers
-                    section_titles = {
-                        'agreement': '🤝 Points of Agreement',
-                        'contention': '⚖️ Points of Contention',
-                        'evolution': '📈 Discussion Evolution',
-                        'synthesis': '🎯 Final Synthesis'
-                    }
-                    
-                    for key, title in section_titles.items():
-                        if key in sections:
-                            st.markdown(f"### {title}")
-                            # Clean formatting and ensure no numbered lists
-                            formatted_content = clean_text_formatting(sections[key])
-                            # Remove any remaining numbered points
-                            formatted_content = re.sub(r'^\d+\.\s+', '', formatted_content, flags=re.MULTILINE)
-                            st.markdown(formatted_content)
-                            st.markdown("---")
-                else:
-                    st.warning("No final analysis available.")
-            except Exception as e:
-                st.error(f"Error displaying final analysis: {str(e)}")
-                if results.get('moderator_summary'):
-                    st.markdown(results['moderator_summary'])
+            if results.get('moderator_summary'):
+                if is_nih:
+                    st.markdown("### NIH Review Summary")
+                
+                # Parse moderator sections
+                sections = parse_moderator_sections(results['moderator_summary'])
+                
+                # Display each section
+                section_titles = {
+                    'agreement': '🤝 Points of Agreement',
+                    'contention': '⚖️ Points of Contention',
+                    'evolution': '📈 Discussion Evolution',
+                    'synthesis': '🎯 Final Synthesis'
+                }
+                
+                for key, title in section_titles.items():
+                    if key in sections:
+                        st.markdown(f"### {title}")
+                        formatted_content = clean_text_formatting(sections[key])
+                        # Remove any remaining numbered points
+                        formatted_content = re.sub(r'^\d+\.\s+', '', formatted_content, flags=re.MULTILINE)
+                        st.markdown(formatted_content)
+                        st.markdown("---")
+            else:
+                st.warning("No final analysis available.")
 
     except Exception as e:
         st.error(f"Error displaying review results: {str(e)}")
         logging.error(f"Review display error: {str(e)}")
+        # Log full error details for debugging
+        logging.exception("Full error details:")
 
 class ModeratorAgent:
     def __init__(self, model="gpt-4o"):
