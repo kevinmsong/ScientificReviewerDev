@@ -1441,9 +1441,22 @@ class ReviewManager:
         iterations = []
         
         try:
-            # [Previous validation code remains the same]
-            
+            # Validate config and reviewer information
+            if not config or not isinstance(config, dict):
+                raise ValueError("Invalid configuration")
+                
+            if not config.get('reviewers') or not isinstance(config['reviewers'], list):
+                raise ValueError("No reviewers specified in configuration")
+                
             reviewers = config['reviewers']
+            
+            # Define is_presentation at the start
+            is_presentation = any(section.get('type') == 'slide' for section in sections)
+            if is_presentation:
+                config['doc_type'] = "Presentation"
+            
+            temperature = self._calculate_temperature(config.get('bias', 0))
+            model = self.model_config.get(config['doc_type'], "gpt-4o")
             
             for iteration in range(config['iterations']):
                 logging.info(f"Starting iteration {iteration + 1}")
@@ -1458,8 +1471,21 @@ class ReviewManager:
                         previous_context = self._create_review_context(iterations, reviewer['expertise'])
                         
                         if is_presentation:
-                            # [Presentation review code remains the same]
-                            pass
+                            presentation_reviewer = PresentationReviewer(model=model)
+                            review_results = presentation_reviewer.review_presentation(
+                                sections=sections,
+                                expertise=reviewer['expertise'],
+                                temperature=temperature
+                            )
+                            
+                            review = {
+                                'reviewer': reviewer['expertise'],
+                                'content': review_results['overall_review']['content'],
+                                'slide_reviews': review_results['slide_reviews'],
+                                'structure_analysis': review_results['structure_analysis'],
+                                'timestamp': datetime.now().isoformat(),
+                                'is_presentation': True
+                            }
                         else:
                             agent = ChatOpenAI(
                                 temperature=temperature,
@@ -1475,20 +1501,73 @@ class ReviewManager:
                                 previous_context=previous_context
                             )
                         
-                        # [Rest of the review processing remains the same]
+                        # Ensure reviewer information is present
+                        if not review.get('reviewer'):
+                            review['reviewer'] = reviewer['expertise']
+                        
+                        iteration_reviews.append(review)
+                        logging.info(f"Generated review for {review['reviewer']}")
                         
                     except Exception as e:
-                        # [Error handling remains the same]
-                        pass
+                        error_msg = f"Error in review by {reviewer['expertise']}: {str(e)}"
+                        logging.error(error_msg)
+                        iteration_reviews.append({
+                            'reviewer': reviewer['expertise'],
+                            'content': error_msg,
+                            'timestamp': datetime.now().isoformat(),
+                            'error': True
+                        })
                 
-                # Generate reviewer dialogue
+                # Create the current iteration data
+                current_iteration = {
+                    'iteration_number': iteration + 1,
+                    'reviews': iteration_reviews,
+                    'reviewers': [r['expertise'] for r in reviewers]
+                }
+                
+                # Generate reviewer dialogue for non-presentation reviews
                 if not is_presentation and iteration_reviews:
-                    # [Dialogue generation remains the same]
-                    pass
+                    try:
+                        valid_reviews = [r for r in iteration_reviews if not r.get('error', False)]
+                        logging.info(f"Found {len(valid_reviews)} valid reviews for dialogue")
+                        
+                        if valid_reviews:
+                            dialogue = self._generate_reviewer_dialogue(
+                                reviews=valid_reviews,
+                                previous_iterations=iterations,  # Pass all previous iterations
+                                config=config
+                            )
+                            
+                            if dialogue and not dialogue.get('error'):
+                                current_iteration['dialogue'] = [dialogue]
+                            else:
+                                current_iteration['dialogue'] = []
+                        else:
+                            current_iteration['dialogue'] = []
+                            
+                    except Exception as e:
+                        logging.error(f"Error generating dialogue: {str(e)}")
+                        current_iteration['dialogue'] = []
                 
                 iterations.append(current_iteration)
+                
+            # Generate final analysis considering all iterations
+            try:
+                logging.info("Generating final analysis")
+                moderator_summary = self.moderator.summarize_discussion(iterations)
+            except Exception as e:
+                logging.error(f"Error generating moderator summary: {str(e)}")
+                moderator_summary = f"Error generating final analysis: {str(e)}"
             
-            # [Rest of the method remains the same]
+            return {
+                'iterations': iterations,
+                'moderator_summary': moderator_summary,
+                'config': config,
+                'timestamp': datetime.now().isoformat(),
+                'doc_type': config['doc_type'],
+                'is_presentation': is_presentation,
+                'reviewers': [r['expertise'] for r in reviewers]
+            }
             
         except Exception as e:
             logging.error(f"Error in review process: {str(e)}")
