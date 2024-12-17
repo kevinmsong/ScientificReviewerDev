@@ -586,7 +586,7 @@ def parse_nih_review_sections(content: str) -> Dict[str, str]:
 
 def display_review_results(results: Dict[str, Any]):
     """
-    Comprehensive display of review results with explicit content rendering.
+    Comprehensive display of review results with collapsible expert reviews.
     """
     try:
         # Validate results
@@ -619,29 +619,27 @@ def display_review_results(results: Dict[str, Any]):
                         st.error(f"Review error: {review.get('content', 'Unknown error')}")
                         continue
                     
-                    # Display reviewer and timestamp
-                    st.markdown(f"### 📝 Review by {review.get('reviewer', 'Unknown')}")
-                    st.markdown(f"*Reviewed at: {review.get('timestamp', 'Unknown time')}*")
-                    
-                    # Display full review content
-                    st.markdown(review.get('content', 'No content available'))
-                    st.markdown("---")
+                    # Use expander for each review
+                    with st.expander(f"📝 Review by {review.get('reviewer', 'Unknown')}", expanded=True):
+                        # Timestamp
+                        st.markdown(f"*Reviewed at: {review.get('timestamp', 'Unknown time')}*")
+                        
+                        # Full review content
+                        st.markdown(review.get('content', 'No content available'))
                 
                 # Process dialogue
                 dialogues = iteration.get('dialogue', [])
                 if dialogues:
                     st.markdown("## Reviewer Dialogue")
                     for dialogue in dialogues:
-                        # Display full dialogue content
-                        st.markdown("### Dialogue")
-                        st.markdown(dialogue.get('content', 'No dialogue content'))
-                        
-                        # Display key points if available
-                        if dialogue.get('key_points'):
-                            st.markdown("#### Key Points")
-                            st.markdown(dialogue.get('key_points', ''))
-                        
-                        st.markdown("---")
+                        with st.expander("💬 Reviewer Discussion", expanded=True):
+                            # Full dialogue content
+                            st.markdown(dialogue.get('content', 'No dialogue content'))
+                            
+                            # Display key points if available
+                            if dialogue.get('key_points'):
+                                st.markdown("#### Key Points")
+                                st.markdown(dialogue.get('key_points', ''))
         
         # Final analysis tab
         with tabs[-1]:
@@ -653,7 +651,7 @@ def display_review_results(results: Dict[str, Any]):
         st.error(f"Error displaying review results: {str(e)}")
         logging.error(f"Review display error: {str(e)}")
         logging.exception("Full error details:")
-
+        
 class ModeratorAgent:
     def __init__(self, model="gpt-4o"):
         self.model = ChatOpenAI(
