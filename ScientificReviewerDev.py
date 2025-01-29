@@ -413,59 +413,90 @@ def scientific_review_page():
         
         col1, col2 = st.columns([2,1])
         with col1:
-            rating_scale = st.radio(
-                "Rating Scale",
-                ["Paper Score (-2 to 2)", "Star Rating (1-5)", "NIH Scale (1-9)"],
-                help="Paper: -2 (worst) to 2 (best)\nStar: 1-5 stars\nNIH: 1 (best) to 9 (worst)"
-            )
+            try:
+                rating_scale = st.radio(
+                    "Rating Scale",
+                    ["Paper Score (-2 to 2)", "Star Rating (1-5)", "NIH Scale (1-9)"],
+                    help="Paper: -2 (worst) to 2 (best)\nStar: 1-5 stars\nNIH: 1 (best) to 9 (worst)"
+                )
+            except Exception as e:
+                st.error("Error setting up rating scale")
+                logging.error(f"Rating scale error: {str(e)}")
+                return
         
-        def get_score_description(scale: str, score: Union[int, float]) -> str:
-            descriptions = {
-                "Paper Score (-2 to 2)": {
-                    -2: "Major flaws, rejection recommended",
-                    -1: "Significant revisions needed",
-                    0: "Moderate revisions needed",
-                    1: "Minor revisions needed",
-                    2: "Accept as is"
-                },
-                "Star Rating (1-5)": {
-                    1: "Poor",
-                    2: "Fair",
-                    3: "Good",
-                    4: "Very Good",
-                    5: "Excellent"
-                },
-                "NIH Scale (1-9)": {
-                    1: "Exceptional",
-                    2: "Outstanding",
-                    3: "Excellent",
-                    4: "Very Good",
-                    5: "Good",
-                    6: "Satisfactory",
-                    7: "Fair",
-                    8: "Marginal",
-                    9: "Poor"
-                }
-            }
-            return descriptions[scale].get(score, "")
+        review_type = st.selectbox("Select Review Type", ["Paper", "Grant", "Poster"])
+        num_reviewers = st.number_input("Number of Reviewers", 1, 10, 2)
+        num_iterations = st.number_input("Discussion Iterations", 1, 10, 2)
+        use_moderator = st.checkbox("Include Moderator", value=True) if num_reviewers > 1 else False
         
-        def adjust_prompt_style(prompt: str, style: int, rating_scale: str) -> str:
-            """Adjust prompt based on critique style and rating scale."""
-            style_adjustments = {
-                -2: "Be extremely thorough and critical. Focus on weaknesses and flaws.",
-                -1: "Maintain high standards. Carefully identify both strengths and weaknesses.",
-                0: "Provide balanced review of strengths and weaknesses.",
-                1: "Emphasize positive aspects while noting necessary improvements.",
-                2: "Take an encouraging approach while noting critical issues."
-            }
-            
-            scale_instructions = {
-                "Paper Score (-2 to 2)": "Score from -2 (worst) to 2 (best)",
-                "Star Rating (1-5)": "Rate from 1 to 5 stars",
-                "NIH Scale (1-9)": "Score from 1 (exceptional) to 9 (poor)"
-            }
-            
-            return f"{prompt}\n\nReview Style: {style_adjustments[style]}\n\nRating: {scale_instructions[rating_scale]}"
+        expertises = []
+        custom_prompts = []
+        
+        with st.expander("Configure Reviewers"):
+            for i in range(num_reviewers):
+                try:
+                    st.subheader(f"Reviewer {i+1}")
+                    col1, col2, col3 = st.columns([1, 2, 1])
+                    with col1:
+                        expertise = st.text_input(f"Expertise", value=f"Expert {i+1}", key=f"expertise_{i}")
+                        model_type = st.selectbox("Model", ["GPT-4o", "Gemini 2.0 Flash"], key=f"model_{i}")
+                    with col2:
+                        prompt = st.text_area("Review Guidelines", value=get_default_prompt(review_type, expertise), key=f"prompt_{i}")
+                    with col3:
+                        critique_style = st.slider(
+                            "Critique Style",
+                            min_value=-2,
+                            max_value=2,
+                            value=-1,
+                            help="-2: Extremely harsh, 2: Extremely lenient",
+                            key=f"style_{i}"
+                        )
+                    
+                    expertises.append({
+                        "name": expertise,
+                        "model": model_type,
+                        "style": critique_style
+                    })
+                    custom_prompts.append(adjust_prompt_style(prompt, critique_style, rating_scale))
+                except Exception as e:
+                    st.error(f"Error configuring reviewer {i+1}")
+                    logging.error(f"Reviewer config error: {str(e)}")
+                    return
+        
+        uploaded_file = st.file_uploader(f"Upload {review_type} (PDF)", type=["pdf"])
+        
+        if uploaded_file and st.button("Start Review"):
+            try:
+                review_container = st.container()
+                with review_container:
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+                    
+                    content = extract_pdf_content(uploaded_file)[0]
+                    agents = create_review_agents(expertises, review_type.lower(), use_moderator)
+                    
+                    results = process_reviews_with_debate(
+                        content=content,
+                        agents=agents,
+                        expertises=expertises,
+                        custom_prompts=custom_prompts,
+                        review_type=review_type.lower(),
+                        num_iterations=num_iterations,
+                        rating_scale=rating_scale,
+                        progress_callback=lambda p, s: (progress_bar.progress(int(p)), status_text.text(s))
+                    )
+                    
+            except Exception as e:
+                st.error("Error during review process")
+                logging.exception(f"Review process error: {str(e)}")
+                if st.checkbox("Show Debug Info"):
+                    st.exception(e)
+                
+    except Exception as e:
+        st.error("Error initializing application")
+        logging.exception(f"Initialization error: {str(e)}")
+        if st.checkbox("Show Debug Info"):
+            st.exception(e)
 
 if __name__ == "__main__":
     try:
