@@ -329,56 +329,56 @@ def process_reviews_with_debate(content: str, agents: List[Union[ChatOpenAI, Any
             st.success(f"Completed iteration {iteration + 1}")
 
         with tabs[-1]:  # Last tab is "Final Analysis"
-        st.subheader("Comprehensive Review Summary")
-        
-        # Aggregate scores
-        scores = []
-        for iteration in all_iterations:
-            for review in iteration:
-                if review.get("success"):
-                    score_matches = re.findall(r'score[:\s]*(-?\d+\.?\d*)', review['review'].lower())
-                    if score_matches:
-                        try:
-                            scores.append(float(score_matches[0]))
-                        except:
-                            pass
-        
-        if scores:
-            avg_score = sum(scores) / len(scores)
-            st.metric("Average Score", f"{avg_score:.2f}")
-            st.write(f"Description: {get_score_description(rating_scale, round(avg_score))}")
-        
-        # Moderator analysis (if moderator is used)
-        if len(agents) > len(expertises):
-            try:
-                moderator_prompt = generate_moderator_analysis(all_iterations)
-                moderator_agent = agents[-1]  # Last agent is the moderator
-                
-                if expertise['model'] == "GPT-4o":
-                    moderator_response = moderator_agent.invoke([HumanMessage(content=moderator_prompt)])
-                    moderator_analysis = extract_content(moderator_response, "[Error in moderator analysis]")
-                else:
-                    moderator_response = moderator_agent.generate_content(moderator_prompt)
-                    moderator_analysis = moderator_response.text
-                
-                st.subheader("Moderator's Final Analysis")
-                st.markdown(moderator_analysis)
-            except Exception as e:
-                st.error(f"Error in moderator analysis: {str(e)}")
-        
-        # Detailed iteration summaries
-        st.subheader("Iteration Summaries")
-        for i, iteration in enumerate(all_iterations, 1):
-            with st.expander(f"Iteration {i} Summary"):
+            st.subheader("Comprehensive Review Summary")
+            
+            # Aggregate scores
+            scores = []
+            for iteration in all_iterations:
                 for review in iteration:
                     if review.get("success"):
-                        st.markdown(f"**Review by {review['expertise']['name']}**")
-                        st.markdown(review['review'])
+                        score_matches = re.findall(r'score[:\s]*(-?\d+\.?\d*)', review['review'].lower())
+                        if score_matches:
+                            try:
+                                scores.append(float(score_matches[0]))
+                            except:
+                                pass
+            
+            if scores:
+                avg_score = sum(scores) / len(scores)
+                st.metric("Average Score", f"{avg_score:.2f}")
+                st.write(f"Description: {get_score_description(rating_scale, round(avg_score))}")
+            
+            # Moderator analysis (if moderator is used)
+            if len(agents) > len(expertises):
+                try:
+                    moderator_prompt = generate_moderator_analysis(all_iterations)
+                    moderator_agent = agents[-1]  # Last agent is the moderator
+                    
+                    if expertise['model'] == "GPT-4o":
+                        moderator_response = moderator_agent.invoke([HumanMessage(content=moderator_prompt)])
+                        moderator_analysis = extract_content(moderator_response, "[Error in moderator analysis]")
+                    else:
+                        moderator_response = moderator_agent.generate_content(moderator_prompt)
+                        moderator_analysis = moderator_response.text
+                    
+                    st.subheader("Moderator's Final Analysis")
+                    st.markdown(moderator_analysis)
+                except Exception as e:
+                    st.error(f"Error in moderator analysis: {str(e)}")
+            
+            # Detailed iteration summaries
+            st.subheader("Iteration Summaries")
+            for i, iteration in enumerate(all_iterations, 1):
+                with st.expander(f"Iteration {i} Summary"):
+                    for review in iteration:
+                        if review.get("success"):
+                            st.markdown(f"**Review by {review['expertise']['name']}**")
+                            st.markdown(review['review'])
 
-    return {
-        "all_iterations": all_iterations,
-        "success": True
-    }
+        return {
+            "all_iterations": all_iterations,
+            "success": True
+        }
 
 def generate_moderator_analysis(all_iterations: List[List[Dict]]) -> str:
     summary = "Complete review discussion for analysis:\n\n"
