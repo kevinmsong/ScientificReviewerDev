@@ -131,16 +131,21 @@ def get_score_description(rating_scale: str, score: float) -> str:
         }
     }
     
-    # Round the score to the nearest integer for lookup
-    rounded_score = round(score)
+    # Get the mapping for the selected rating scale
+    scale_mapping = descriptions.get(rating_scale, {})
     
-    # If the exact score isn't in descriptions, find the closest match
-    if rounded_score not in descriptions.get(rating_scale, {}):
-        scale_scores = list(descriptions.get(rating_scale, {}).keys())
-        if scale_scores:
-            rounded_score = min(scale_scores, key=lambda x: abs(x - rounded_score))
+    # Round the score based on the scale
+    if rating_scale == "Paper Score (-2 to 2)":
+        rounded_score = round(score)
+    elif rating_scale == "Star Rating (1-5)":
+        rounded_score = min(max(round(score), 1), 5)
+    elif rating_scale == "NIH Scale (1-9)":
+        # NIH Scale goes 1, 3, 5, 7, 9
+        scale_values = [1, 3, 5, 7, 9]
+        rounded_score = min(scale_values, key=lambda x: abs(x - score))
     
-    return descriptions.get(rating_scale, {}).get(rounded_score, f"Score {score}")
+    # Return description or fallback
+    return scale_mapping.get(rounded_score, f"Score {score}")
 
 def get_debate_prompt(expertise: str, iteration: int, previous_reviews: List[Dict[str, str]], topic: str) -> str:
     """Generate a debate-style prompt for reviewers."""
@@ -345,7 +350,10 @@ def process_reviews_with_debate(content: str, agents: List[Union[ChatOpenAI, Any
         if scores:
             avg_score = sum(scores) / len(scores)
             st.metric("Average Score", f"{avg_score:.2f}")
-            st.write(f"Description: {get_score_description(rating_scale, round(avg_score))}")
+            
+            # Use the selected rating scale for description
+            description = get_score_description(rating_scale, avg_score)
+            st.write(f"Description: {description}")
         
         # Moderator analysis (if moderator is used)
         if len(agents) > len(expertises):
