@@ -18,7 +18,7 @@ logging.basicConfig(level=logging.INFO)
 openai_api_key = st.secrets["openai_api_key"]
 client = OpenAI(api_key=openai_api_key)
 
-def create_review_agents(num_agents: int, review_type: str = "paper", include_moderator: bool = False, model_type: str = "gpt-4o") -> List[Union[ChatOpenAI, Any]]:
+def create_review_agents(num_agents: int, review_type: str = "paper", include_moderator: bool = False, model_type: str = "GPT-4o") -> List[Union[ChatOpenAI, Any]]:
     """Create review agents including a moderator if specified."""
     agents = []
     
@@ -33,7 +33,7 @@ def create_review_agents(num_agents: int, review_type: str = "paper", include_mo
             agents.append(model)
     
     if include_moderator and num_agents > 1:
-        if model_type == "gpt-4o":
+        if model_type == "GPT-4o":
             moderator_agent = ChatOpenAI(temperature=0.1, openai_api_key=openai_api_key, model="gpt-4o")
         else:
             moderator_agent = model
@@ -333,7 +333,7 @@ def scientific_review_page():
                 num_reviewers, 
                 review_type.lower(), 
                 use_moderator,
-                "gpt-4o" if model_type == "GPT-4" else "gemini"
+                model_type  # Pass the exact model_type
             )
             
             results = process_reviews_with_debate(
@@ -343,28 +343,9 @@ def scientific_review_page():
                 custom_prompts=custom_prompts,
                 review_type=review_type.lower(),
                 num_iterations=num_iterations,
-                model_type="gpt-4o" if model_type == "GPT-4" else "gemini",
+                model_type=model_type,  # Pass the exact model_type
                 progress_callback=lambda p, s: (progress_bar.progress(int(p)), status_text.text(s))
             )
-            
-            progress_bar.empty()
-            status_text.empty()
-            st.success("Review completed!")
-            
-            for iteration_idx, iteration_reviews in enumerate(results["all_iterations"], 1):
-                st.subheader(f"Iteration {iteration_idx}")
-                for review in iteration_reviews:
-                    with st.expander(f"Review by {review['expertise']}", expanded=True):
-                        st.write(review['review'])
-            
-            if results["moderation"]:
-                st.subheader("Moderator Analysis")
-                st.write(results["moderation"])
-                
-        except Exception as e:
-            st.error(f"Error: {str(e)}")
-            if st.checkbox("Debug Mode"):
-                st.exception(e)
 
 if __name__ == "__main__":
     try:
