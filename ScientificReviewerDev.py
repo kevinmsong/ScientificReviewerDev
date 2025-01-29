@@ -342,32 +342,21 @@ def scientific_review_page():
                 status_text.empty()
                 st.success("Review completed!")
                 
-                logging.info("Processing results")
-                logging.info(f"Number of iterations: {len(results['all_iterations'])}")
-                
                 # Display reviews
-                results_container = st.container()
-                with results_container:
-                    for iteration_idx, iteration_reviews in enumerate(results["all_iterations"]):
-                        st.subheader(f"Iteration {iteration_idx + 1}")
-                        logging.info(f"Processing iteration {iteration_idx + 1}")
-                        logging.info(f"Reviews in iteration: {len(iteration_reviews)}")
-                        
-                        cols = st.columns(len(iteration_reviews))
-                        for col, review in zip(cols, iteration_reviews):
-                            with col:
-                                st.markdown(f"**Review by {review['expertise']}**")
-                                if review.get("success", False):
-                                    st.markdown(review["review"])
-                                else:
-                                    st.error(review["review"])
-                                st.markdown("---")
+                for iteration_idx, iteration_reviews in enumerate(results["all_iterations"]):
+                    st.subheader(f"Iteration {iteration_idx + 1}")
+                    
+                    for review in iteration_reviews:
+                        with st.expander(f"Review by {review['expertise']}", expanded=True):
+                            if review.get("success", False):
+                                st.markdown(review["review"])
+                            else:
+                                st.error(review["review"])
                 
                 # Display moderator analysis if available
                 if results.get("moderation"):
-                    with results_container:
-                        st.subheader("Final Moderator Analysis")
-                        st.markdown(results["moderation"])
+                    st.subheader("Final Moderator Analysis")
+                    st.markdown(results["moderation"])
                         
             except Exception as e:
                 st.error(f"Review process error: {str(e)}")
@@ -378,7 +367,7 @@ def scientific_review_page():
     except Exception as e:
         st.error(f"Page initialization error: {str(e)}")
         logging.exception("Error in scientific_review_page:")
-
+        
 if __name__ == "__main__":
     try:
         scientific_review_page()
