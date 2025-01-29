@@ -147,8 +147,8 @@ def get_score_description(rating_scale: str, score: float) -> str:
     # Return description or fallback
     return scale_mapping.get(rounded_score, f"Score {score}")
 
-def get_debate_prompt(expertise: str, iteration: int, previous_reviews: List[Dict[str, str]], topic: str) -> str:
-    """Generate a debate-style prompt for reviewers."""
+def get_debate_prompt(expertise: str, iteration: int, previous_reviews: List[Dict[str, str]], topic: str, rating_scale: str) -> str:
+    """Generate a debate-style prompt for reviewers with dynamic scoring."""
     prompt = f"""As an expert in {expertise}, you are participating in iteration {iteration} of a scientific review discussion.
 
 Previous reviews and comments to consider:
@@ -157,6 +157,13 @@ Previous reviews and comments to consider:
     for prev_review in previous_reviews:
         prompt += f"\nReview by {prev_review['expertise']}:\n{prev_review['review']}\n"
         
+    # Dynamic scoring instructions based on rating scale
+    scoring_instructions = {
+        "Paper Score (-2 to 2)": "Provide a score from -2 (worst) to 2 (best), with -2 being fundamentally flawed and 2 being exceptional.",
+        "Star Rating (1-5)": "Provide a star rating from 1 (poor) to 5 (excellent), with 3 being average.",
+        "NIH Scale (1-9)": "Provide a score from 1 (exceptional) to 9 (poor), with 5 being competitive."
+    }
+    
     if iteration == 1:
         prompt += f"""
 Please provide your initial review of this {topic} with:
@@ -166,7 +173,7 @@ Please provide your initial review of this {topic} with:
 4. Strengths
 5. Weaknesses
 6. Suggestions for Improvement
-7. Scores (1-9)
+7. Scores: {scoring_instructions[rating_scale]}
 """
     else:
         prompt += f"""
@@ -175,7 +182,7 @@ Based on the previous reviews, please:
 2. Defend or revise your previous assessments
 3. Identify areas of agreement and disagreement
 4. Provide additional insights or counterpoints
-5. Update your scores if necessary
+5. Update your scores: {scoring_instructions[rating_scale]}
 """
     return prompt
 
@@ -271,7 +278,14 @@ def process_reviews_with_debate(content: str, agents: List[Union[ChatOpenAI, Any
                     processing_msg = st.empty()
                     processing_msg.info(f"Processing review from {expertise['name']}...")
                     try:
-                        debate_prompt = get_debate_prompt(expertise['name'], iteration + 1, latest_reviews, review_type)
+                        debate_prompt = get_debate_prompt(
+                            expertise['name'], 
+                            iteration + 1, 
+                            latest_reviews, 
+                            review_type, 
+                            rating_scale  # Add this parameter
+                        )
+                        
                         full_prompt = f"{base_prompt}\n\n{debate_prompt}"
                         
                         review_text = process_chunks_with_debate(
@@ -505,7 +519,7 @@ def scientific_review_page():
                 return
         
         review_type = st.selectbox("Select Review Type", ["Paper", "Grant", "Poster"])
-        num_reviewers = st.number_input("Number of Reviewers", 1, 10, 2)
+        num_reviewers = st.number_input("Number of Reviewers", 1, 10, 2)import base64
         num_iterations = st.number_input("Discussion Iterations", 1, 10, 2)
         use_moderator = st.checkbox("Include Moderator", value=True) if num_reviewers > 1 else False
         
