@@ -348,8 +348,4 @@ def scientific_review_page():
             )
 
 if __name__ == "__main__":
-    try:
-        scientific_review_page()
-    except Exception as e:
-        st.error(f"Error: {str(e)}")
-        logging.exception("Error in main:")
+    scientific_review_page()
