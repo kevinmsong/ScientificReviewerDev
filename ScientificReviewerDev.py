@@ -2,7 +2,7 @@ import streamlit as st
 import logging
 from openai import OpenAI
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import HumanMessage
+from langchain.schema import HumanMessage
 import fitz
 import io
 from PIL import Image
@@ -309,6 +309,18 @@ def scientific_review_page():
         num_iterations = st.number_input("Discussion Iterations", 1, 10, 2)
         use_moderator = st.checkbox("Include Moderator", value=True) if num_reviewers > 1 else False
         
+        review_containers = {}
+        iteration_containers = []
+        
+        # Initialize containers for each iteration
+        for iteration in range(num_iterations):
+            iteration_header = st.subheader(f"Iteration {iteration + 1}")
+            iteration_container = st.container()
+            iteration_containers.append({
+                "header": iteration_header,
+                "container": iteration_container
+            })
+        
         expertises = []
         custom_prompts = []
         
@@ -318,9 +330,18 @@ def scientific_review_page():
                 with col1:
                     expertise = st.text_input(f"Expertise {i+1}", f"Expert {i+1}")
                     expertises.append(expertise)
+                    # Initialize reviewer containers
+                    if expertise not in review_containers:
+                        review_containers[expertise] = []
                 with col2:
                     prompt = st.text_area(f"Prompt {i+1}", get_default_prompt(review_type, expertise))
                     custom_prompts.append(prompt)
+                
+                # Create empty containers for each reviewer in each iteration
+                for iteration_data in iteration_containers:
+                    with iteration_data["container"]:
+                        reviewer_container = st.empty()
+                        review_containers[expertise].append(reviewer_container)
         
         uploaded_file = st.file_uploader(f"Upload {review_type} (PDF)", type=["pdf"])
         
@@ -352,19 +373,27 @@ def scientific_review_page():
                 status_text.empty()
                 st.success("Review completed!")
                 
-                # Display results
-                for iteration_idx, iteration_reviews in enumerate(results["all_iterations"], 1):
-                    st.subheader(f"Iteration {iteration_idx}")
-                    for review in iteration_reviews:
-                        with st.expander(f"Review by {review['expertise']}", expanded=True):
+                # Update UI with results
+                for iteration in range(num_iterations):
+                    for i, (expertise, review) in enumerate(zip(expertises, results["all_iterations"][iteration])):
+                        with review_containers[expertise][iteration].container():
                             if review.get("success", False):
-                                st.write(review['review'])
+                                st.write(f"Review by {expertise}")
+                                st.markdown("---")
+                                sections = review["review"].split('\n\n')
+                                for section in sections:
+                                    st.write(section.strip())
+                                    st.markdown("---")
                             else:
-                                st.error(review['review'])
+                                st.error(review["review"])
                 
-                if results["moderation"]:
-                    st.subheader("Moderator Analysis")
-                    st.write(results["moderation"])
+                # Display moderator analysis if available
+                if results.get("moderation"):
+                    st.subheader("Final Moderator Analysis")
+                    sections = results["moderation"].split('\n\n')
+                    for section in sections:
+                        st.write(section.strip())
+                        st.markdown("---")
                     
             except Exception as e:
                 st.error(f"Review process error: {str(e)}")
