@@ -105,7 +105,7 @@ def extract_pdf_content(pdf_file) -> Tuple[str, List[Image.Image]]:
     
     return text_content, images
 
-def get_score_description(rating_scale: str, score: int) -> str:
+def get_score_description(rating_scale: str, score: float) -> str:
     """Provide description for different rating scales."""
     descriptions = {
         "Paper Score (-2 to 2)": {
@@ -130,7 +130,17 @@ def get_score_description(rating_scale: str, score: int) -> str:
             9: "Poor"
         }
     }
-    return descriptions.get(rating_scale, {}).get(score, "N/A")
+    
+    # Round the score to the nearest integer for lookup
+    rounded_score = round(score)
+    
+    # If the exact score isn't in descriptions, find the closest match
+    if rounded_score not in descriptions.get(rating_scale, {}):
+        scale_scores = list(descriptions.get(rating_scale, {}).keys())
+        if scale_scores:
+            rounded_score = min(scale_scores, key=lambda x: abs(x - rounded_score))
+    
+    return descriptions.get(rating_scale, {}).get(rounded_score, f"Score {score}")
 
 def get_debate_prompt(expertise: str, iteration: int, previous_reviews: List[Dict[str, str]], topic: str) -> str:
     """Generate a debate-style prompt for reviewers."""
