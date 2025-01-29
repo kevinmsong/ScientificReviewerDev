@@ -198,7 +198,7 @@ def generate_debate_summary(reviews: List[Dict], expertise: str) -> str:
 3. Synthesis
 - Areas of consensus
 - Key disagreements
-- Final assessment
+- Moderator assessment
 
 Keep responses focused and evidence-based."""
     
@@ -209,7 +209,7 @@ def process_reviews_with_debate(content: str, agents: List[Union[ChatOpenAI, Any
                               progress_callback=None) -> Dict[str, Any]:
     all_iterations = []
     latest_reviews = []
-    tabs = st.tabs([f"Iteration {i+1}" for i in range(num_iterations)] + ["Final Analysis"])
+    tabs = st.tabs([f"Iteration {i+1}" for i in range(num_iterations)] + ["Moderator Analysis"])
     
     for iteration in range(num_iterations):
         with tabs[iteration]:
@@ -329,7 +329,7 @@ def generate_moderator_analysis(all_iterations: List[List[Dict]]) -> str:
 - Evidence quality
 - Constructiveness of dialogue
 
-3. Final Synthesis
+3. Moderator Synthesis
 - Critical consensus points
 - Unresolved debates
 - Priority recommendations
@@ -369,7 +369,7 @@ Please provide:
 1. Discussion Evolution
 2. Review Analysis
 3. Key Points Synthesis
-4. Final Assessment including scores and recommendation
+4. Moderator Assessment including scores and recommendation
 """
     return prompt
 
@@ -483,7 +483,7 @@ def scientific_review_page():
                     
                     # Display moderator analysis if available
                     if results.get("moderation"):
-                        st.subheader("Final Moderator Analysis")
+                        st.subheader("Moderator Analysis")
                         st.markdown(results["moderation"])
                             
                 except Exception as e:
