@@ -27,7 +27,7 @@ def create_review_agents(num_agents: int, review_type: str = "paper", include_mo
             agents.append(ChatOpenAI(temperature=0.1, openai_api_key=openai_api_key, model=model))
     else:
         genai.configure(api_key=st.secrets["gemini_api_key"])
-        model = genai.GenerativeModel("gemini-2.0-flash")
+        model = genai.GenerativeModel("gemini-2.0-flash-exp")
         for _ in range(num_agents):
             agents.append(model)
     
@@ -289,7 +289,7 @@ def scientific_review_page():
         st.set_page_config(page_title="Scientific Reviewer", layout="wide")
         st.header("Scientific Review System")
         
-        model_type = st.selectbox("Select Model", ["GPT-4o", "Gemini"])
+        model_type = st.selectbox("Select Model", ["GPT-4o", "Gemini 2.0 Flash"])
         review_type = st.selectbox("Select Review Type", ["Paper", "Grant", "Poster"])
         num_reviewers = st.number_input("Number of Reviewers", 1, 10, 2)
         num_iterations = st.number_input("Discussion Iterations", 1, 10, 2)
