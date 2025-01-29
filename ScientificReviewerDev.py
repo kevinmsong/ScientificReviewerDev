@@ -325,7 +325,7 @@ def scientific_review_page():
     
     if uploaded_file and st.button("Start Review"):
         progress_bar = st.progress(0)
-        status_text = st.empty()status_text = st.empty()
+        status_text = st.empty()
         
         try:
             content = extract_pdf_content(uploaded_file)[0]
