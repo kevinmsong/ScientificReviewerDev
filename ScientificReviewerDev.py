@@ -321,7 +321,7 @@ def scientific_review_page():
                 prompt = st.text_area(f"Prompt {i+1}", get_default_prompt(review_type, expertise))
                 custom_prompts.append(prompt)
     
-    uploaded_file = st.file_uploader(f"Upload {review_type} (PDF)", type=["pdf"])uploaded_file = st.file_uploader(f"Upload {review_type} (PDF)", type=["pdf"])
+    uploaded_file = st.file_uploader(f"Upload {review_type} (PDF)", type=["pdf"])
     
     if uploaded_file and st.button("Start Review"):
         progress_bar = st.progress(0)
