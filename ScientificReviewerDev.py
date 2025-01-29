@@ -142,20 +142,17 @@ Based on the previous reviews, please:
     return prompt
 
 def process_chunks_with_debate(chunks: List[str], agent: Union[ChatOpenAI, Any], expertise: str, 
-                             prompt: str, iteration: int, model_type: str = "gpt-4o") -> str:
-    """Process multiple chunks of content for a single review iteration."""
+                             prompt: str, iteration: int, model_type: str = "GPT-4o") -> str:
     chunk_reviews = []
     
     for i, chunk in enumerate(chunks):
         chunk_prompt = f"""Reviewing part {i+1} of {len(chunks)}:
-
 {prompt}
-
 Content part {i+1}/{len(chunks)}:
 {chunk}"""
 
         try:
-            if model_type == "gpt-4o":
+            if model_type == "GPT-4o":
                 response = agent.invoke([HumanMessage(content=chunk_prompt)])
                 chunk_review = extract_content(response, f"[Error processing chunk {i+1}]")
             else:
@@ -167,13 +164,11 @@ Content part {i+1}/{len(chunks)}:
             chunk_reviews.append(f"[Error in chunk {i+1}]")
     
     if len(chunks) > 1:
-        compilation_prompt = f"""Please compile your reviews of all {len(chunks)} parts into a single coherent review.
-
-Previous chunk reviews:
+        compilation_prompt = f"""Compile your reviews of all {len(chunks)} parts:
 {''.join(chunk_reviews)}"""
 
         try:
-            if model_type == "gpt-4o":
+            if model_type == "GPT-4o":
                 compilation_response = agent.invoke([HumanMessage(content=compilation_prompt)])
                 return extract_content(compilation_response, "[Error compiling final review]")
             else:
