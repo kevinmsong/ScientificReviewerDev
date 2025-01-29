@@ -203,11 +203,11 @@ def process_reviews_with_debate(content: str, agents: List[Union[ChatOpenAI, Any
                 full_prompt = f"{base_prompt}\n\n{debate_prompt}"
                 
                 review_text = process_chunks_with_debate(
-                    content_chunks=chunk_content(content),
+                    chunks=chunk_content(content),
                     agent=agent,
                     expertise=expertise,
                     prompt=full_prompt,
-                    iteration=iteration + 1,
+                    iteration=iteration + 1, 
                     model_type=model_type
                 )
                 
