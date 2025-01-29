@@ -519,7 +519,7 @@ def scientific_review_page():
                 return
         
         review_type = st.selectbox("Select Review Type", ["Paper", "Grant", "Poster"])
-        num_reviewers = st.number_input("Number of Reviewers", 1, 10, 2)import base64
+        num_reviewers = st.number_input("Number of Reviewers", 1, 10, 2)
         num_iterations = st.number_input("Discussion Iterations", 1, 10, 2)
         use_moderator = st.checkbox("Include Moderator", value=True) if num_reviewers > 1 else False
         
