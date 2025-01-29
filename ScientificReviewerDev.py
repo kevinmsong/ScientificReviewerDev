@@ -383,7 +383,7 @@ def process_reviews_with_debate(content: str, agents: List[Union[ChatOpenAI, Any
                     moderator_response = moderator_agent.generate_content(moderator_prompt)
                     moderator_analysis = moderator_response.text
                 
-                st.subheader("Moderator's Moderator Analysis")
+                st.subheader("Moderator Analysis")
                 st.markdown(moderator_analysis)
             except Exception as e:
                 st.error(f"Error in moderator analysis: {str(e)}")
