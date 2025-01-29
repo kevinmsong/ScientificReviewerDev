@@ -265,7 +265,7 @@ def process_reviews_with_debate(content: str, agents: List[Union[ChatOpenAI, Any
                               rating_scale: str = "Paper Score (-2 to 2)", progress_callback=None) -> Dict[str, Any]:
     all_iterations = []
     latest_reviews = []
-    tabs = st.tabs([f"Iteration {i+1}" for i in range(num_iterations)] + ["Moderator Analysis"])
+    tabs = st.tabs([f"Iteration {i+1}" for i in range(num_iterations)] + ["Final Analysis"])
     
     for iteration in range(num_iterations):
         with tabs[iteration]:
@@ -283,7 +283,7 @@ def process_reviews_with_debate(content: str, agents: List[Union[ChatOpenAI, Any
                             iteration + 1, 
                             latest_reviews, 
                             review_type, 
-                            rating_scale  # Add this parameter
+                            rating_scale
                         )
                         
                         full_prompt = f"{base_prompt}\n\n{debate_prompt}"
@@ -345,8 +345,8 @@ def process_reviews_with_debate(content: str, agents: List[Union[ChatOpenAI, Any
             latest_reviews = review_results
             st.success(f"Completed iteration {iteration + 1}")
 
-    # Moderator Analysis tab handling
-    with tabs[-1]:  # Last tab is "Moderator Analysis"
+    # Final Analysis tab handling
+    with tabs[-1]:  # Last tab is "Final Analysis"
         st.subheader("Comprehensive Review Summary")
         
         # Aggregate scores
@@ -375,15 +375,15 @@ def process_reviews_with_debate(content: str, agents: List[Union[ChatOpenAI, Any
                 moderator_prompt = generate_moderator_analysis(all_iterations)
                 moderator_agent = agents[-1]  # Last agent is the moderator
                 
-                # Use appropriate method based on model type
-                if expertises[-1]['model'] == "GPT-4o":
+                # Consistent method for both GPT-4o and Gemini
+                if isinstance(moderator_agent, ChatOpenAI):
                     moderator_response = moderator_agent.invoke([HumanMessage(content=moderator_prompt)])
                     moderator_analysis = extract_content(moderator_response, "[Error in moderator analysis]")
                 else:
                     moderator_response = moderator_agent.generate_content(moderator_prompt)
                     moderator_analysis = moderator_response.text
                 
-                st.subheader("Moderator Analysis")
+                st.subheader("Moderator's Analysis")
                 st.markdown(moderator_analysis)
             except Exception as e:
                 st.error(f"Error in moderator analysis: {str(e)}")
@@ -530,7 +530,7 @@ def scientific_review_page():
         with st.expander("Configure Reviewers"):
             for i in range(num_reviewers):
                 try:
-                    st.subheader(f"Reviewer {i+1}")
+                    st.subheader(f"Reviewer {i+1}")openai_api_key = st.secrets ["openai_api_key"]
                     col1, col2, col3 = st.columns([1, 2, 1])
                     with col1:
                         expertise = st.text_input(f"Expertise", value=f"Expert {i+1}", key=f"expertise_{i}")
