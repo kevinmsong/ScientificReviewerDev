@@ -299,7 +299,7 @@ def get_default_prompt(review_type: str, expertise: str) -> str:
     return prompts.get(review_type, f"Review this {review_type.lower()}")
 
 def scientific_review_page():
-    st.set_page_config(page_title="Scientific Review", layout="wide")
+    st.set_page_config(page_title="Scientific Reviewer", layout="wide")
     st.header("Multi-Agent Scientific Review System")
     
     model_type = st.selectbox("Select Model", ["o1", "Gemini"])
