@@ -35,7 +35,7 @@ def create_review_agents(expertises: List[Dict], review_type: str = "paper", inc
     
     return agents
 
-def chunk_content(text: str, max_tokens: int = 6000) -> List[str]:
+def chunk_content(text: str, max_tokens: int = 100000) -> List[str]:
     """Split content into chunks that fit within token limits."""
     encoding = tiktoken.encoding_for_model("gpt-4o")
     tokens = encoding.encode(text)
@@ -175,13 +175,9 @@ Content part {i+1}/{len(chunks)}:
     
     return chunk_reviews[0]
 
-def process_reviews_with_debate(content: str, agents: List[Union[ChatOpenAI, Any]], expertises: List[str], 
+def process_reviews_with_debate(content: str, agents: List[Union[ChatOpenAI, Any]], expertises: List[Dict], 
                               custom_prompts: List[str], review_type: str, num_iterations: int, 
-                              model_type: str = "GPT-4o", progress_callback=None) -> Dict[str, Any]:
-    logging.info(f"Starting process_reviews_with_debate")
-    logging.info(f"Model type: {model_type}")
-    logging.info(f"Number of agents: {len(agents)}")
-    
+                              progress_callback=None) -> Dict[str, Any]:
     all_iterations = []
     latest_reviews = []
     
@@ -191,9 +187,9 @@ def process_reviews_with_debate(content: str, agents: List[Union[ChatOpenAI, Any
         
         for i, (agent, expertise, base_prompt) in enumerate(zip(agents[:-1] if len(agents) > len(expertises) else agents, expertises, custom_prompts)):
             processing_msg = st.empty()
-            processing_msg.info(f"Processing review from {expertise}...")
+            processing_msg.info(f"Processing review from {expertise['name']}...")
             try:
-                debate_prompt = get_debate_prompt(expertise, iteration + 1, latest_reviews, review_type)
+                debate_prompt = get_debate_prompt(expertise['name'], iteration + 1, latest_reviews, review_type)
                 full_prompt = f"{base_prompt}\n\n{debate_prompt}"
                 
                 review_text = process_chunks_with_debate(
@@ -202,7 +198,7 @@ def process_reviews_with_debate(content: str, agents: List[Union[ChatOpenAI, Any
                     expertise=expertise,
                     prompt=full_prompt,
                     iteration=iteration + 1,
-                    model_type=model_type
+                    model_type=expertise['model']
                 )
                 
                 review_results.append({
@@ -211,7 +207,7 @@ def process_reviews_with_debate(content: str, agents: List[Union[ChatOpenAI, Any
                     "iteration": iteration + 1,
                     "success": True
                 })
-                processing_msg.success(f"Completed review from {expertise}")
+                processing_msg.success(f"Completed review from {expertise['name']}")
                 
             except Exception as e:
                 logging.error(f"Error processing agent {expertise}: {str(e)}")
@@ -221,7 +217,7 @@ def process_reviews_with_debate(content: str, agents: List[Union[ChatOpenAI, Any
                     "iteration": iteration + 1,
                     "success": False
                 })
-                processing_msg.error(f"Error processing review from {expertise}")
+                processing_msg.error(f"Error processing review from {expertise['name']}")
         
         all_iterations.append(review_results)
         latest_reviews = review_results
