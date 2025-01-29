@@ -375,7 +375,8 @@ def process_reviews_with_debate(content: str, agents: List[Union[ChatOpenAI, Any
                 moderator_prompt = generate_moderator_analysis(all_iterations)
                 moderator_agent = agents[-1]  # Last agent is the moderator
                 
-                if expertise['model'] == "GPT-4o":
+                # Use appropriate method based on model type
+                if expertises[-1]['model'] == "GPT-4o":
                     moderator_response = moderator_agent.invoke([HumanMessage(content=moderator_prompt)])
                     moderator_analysis = extract_content(moderator_response, "[Error in moderator analysis]")
                 else:
