@@ -189,58 +189,69 @@ Previous chunk reviews:
 def process_reviews_with_debate(content: str, agents: List[Union[ChatOpenAI, Any]], expertises: List[str], 
                               custom_prompts: List[str], review_type: str, num_iterations: int, 
                               model_type: str = "gpt-4o", progress_callback=None) -> Dict[str, Any]:
-    all_iterations = []
-    latest_reviews = []
-    
-    logging.info(f"Starting review process with {num_iterations} iterations")
-    
-    for iteration in range(num_iterations):
-        review_results = []
+    try:
+        logging.info("Starting process_reviews_with_debate")
+        logging.info(f"Model type: {model_type}")
+        logging.info(f"Number of agents: {len(agents)}")
         
-        if progress_callback:
-            progress = (iteration / num_iterations) * 100
-            progress_callback(progress, f"Processing iteration {iteration + 1}/{num_iterations}")
+        all_iterations = []
+        latest_reviews = []
         
-        for i, (agent, expertise, base_prompt) in enumerate(zip(agents[:-1], expertises, custom_prompts)):
-            try:
-                debate_prompt = get_debate_prompt(expertise, iteration + 1, latest_reviews, review_type)
-                full_prompt = f"{base_prompt}\n\n{debate_prompt}"
-                
-                review_text = process_chunks_with_debate(
-                    content_chunks=chunk_content(content),
-                    agent=agent,
-                    expertise=expertise,
-                    prompt=full_prompt,
-                    iteration=iteration + 1,
-                    model_type=model_type
-                )
-                
-                logging.info(f"Got review from {expertise} for iteration {iteration + 1}")
-                
-                review_results.append({
-                    "expertise": expertise,
-                    "review": review_text,
-                    "iteration": iteration + 1,
-                    "success": True
-                })
-                
-            except Exception as e:
-                logging.error(f"Error in review process for {expertise}: {str(e)}")
-                review_results.append({
-                    "expertise": expertise,
-                    "review": f"Error: {str(e)}",
-                    "iteration": iteration + 1,
-                    "success": False
-                })
-        
-        all_iterations.append(review_results)
-        latest_reviews = review_results
-        logging.info(f"Completed iteration {iteration + 1}")
-    
-    return {
-        "all_iterations": all_iterations,
-        "moderation": None
-    }
+        for iteration in range(num_iterations):
+            review_results = []
+            logging.info(f"Starting iteration {iteration + 1}")
+            
+            for i, (agent, expertise, base_prompt) in enumerate(zip(agents[:-1], expertises, custom_prompts)):
+                try:
+                    logging.info(f"Processing agent {expertise}")
+                    debate_prompt = get_debate_prompt(expertise, iteration + 1, latest_reviews, review_type)
+                    full_prompt = f"{base_prompt}\n\n{debate_prompt}"
+                    
+                    review_text = process_chunks_with_debate(
+                        content_chunks=chunk_content(content),
+                        agent=agent,
+                        expertise=expertise,
+                        prompt=full_prompt,
+                        iteration=iteration + 1,
+                        model_type=model_type
+                    )
+                    
+                    logging.info(f"Got review from {expertise}")
+                    review_results.append({
+                        "expertise": expertise,
+                        "review": review_text,
+                        "iteration": iteration + 1,
+                        "success": True
+                    })
+                    
+                except Exception as e:
+                    logging.error(f"Error processing agent {expertise}: {str(e)}")
+                    review_results.append({
+                        "expertise": expertise,
+                        "review": f"Error: {str(e)}",
+                        "iteration": iteration + 1,
+                        "success": False
+                    })
+            
+            all_iterations.append(review_results)
+            latest_reviews = review_results
+            logging.info(f"Completed iteration {iteration + 1}")
+            logging.info(f"Number of reviews in iteration: {len(review_results)}")
+
+        return {
+            "all_iterations": all_iterations,
+            "moderation": None,
+            "success": True
+        }
+
+    except Exception as e:
+        logging.error(f"Error in process_reviews_with_debate: {str(e)}")
+        return {
+            "all_iterations": [],
+            "moderation": None,
+            "success": False,
+            "error": str(e)
+        }
 
 def generate_moderator_prompt(all_iterations: List[List[Dict[str, str]]]) -> str:
     """Generate the prompt for the moderator's analysis."""
@@ -298,7 +309,7 @@ def scientific_review_page():
         num_reviewers = st.number_input("Number of Reviewers", 1, 10, 2)
         num_iterations = st.number_input("Discussion Iterations", 1, 10, 2)
         use_moderator = st.checkbox("Include Moderator", value=True) if num_reviewers > 1 else False
-        
+        import time
         expertises = []
         custom_prompts = []
         
@@ -324,7 +335,7 @@ def scientific_review_page():
                     num_reviewers, 
                     review_type.lower(), 
                     use_moderator,
-                    model_type
+                    model_typemodel_type
                 )
                 
                 results = process_reviews_with_debate(
@@ -367,7 +378,7 @@ def scientific_review_page():
     except Exception as e:
         st.error(f"Page initialization error: {str(e)}")
         logging.exception("Error in scientific_review_page:")
-        
+
 if __name__ == "__main__":
     try:
         scientific_review_page()
