@@ -347,7 +347,7 @@ def scientific_review_page():
                 progress_callback=lambda p, s: (progress_bar.progress(int(p)), status_text.text(s))
             )
 
-if __name__ == "__main__":if __name__ == "__main__":
+if __name__ == "__main__":
     try:
         scientific_review_page()
     except Exception as e:
