@@ -501,7 +501,7 @@ def scientific_review_page():
         num_iterations = st.number_input("Discussion Iterations", 1, 10, 2)
         use_moderator = st.checkbox("Include Moderator", value=True) if num_reviewers > 1 else False
         
-        expertises = []import google.generativeai as genai
+        expertises = []
         custom_prompts = []
         
         with st.expander("Configure Reviewers"):
