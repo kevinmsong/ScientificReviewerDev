@@ -347,17 +347,22 @@ def generate_moderator_analysis(all_iterations: List[List[Dict]]) -> str:
     
     return summary + "\n\n" + prompt
 
-def adjust_prompt_style(prompt: str, style: int) -> str:
-    """Adjust the prompt based on critique style."""
-    style_adjustments = {
-        -2: """Please be extremely thorough and critical in your review. Focus heavily on identifying weaknesses, methodological flaws, and areas needing significant improvement. While acknowledging strengths, emphasize rigorous critique.""",
-        -1: """Maintain high standards in your review. Carefully identify both strengths and weaknesses, with particular attention to areas needing improvement.""",
-        0: """Provide a balanced review that equally considers both strengths and weaknesses. Aim for constructive feedback that acknowledges both positive aspects and areas for improvement.""",
-        1: """While identifying areas for improvement, emphasize the positive aspects and potential of the work. Focus on constructive suggestions rather than criticism.""",
-        2: """Take an encouraging and supportive approach in your review. While noting any critical issues, focus primarily on strengths and positive aspects of the work."""
+def adjust_prompt_style(prompt: str, style: int, rating_scale: str) -> str:
+    style_map = {
+        -2: "Be extremely thorough and critical. Focus on weaknesses and flaws.",
+        -1: "Maintain high standards. Carefully identify both strengths and weaknesses.",
+        0: "Provide balanced review of strengths and weaknesses.",
+        1: "Emphasize positive aspects while noting necessary improvements.",
+        2: "Take an encouraging approach while noting critical issues."
     }
     
-    return f"{prompt}\n\nReview Style: {style_adjustments[style]}"
+    scale_map = {
+        "Paper Score (-2 to 2)": "Score from -2 (worst) to 2 (best)",
+        "Star Rating (1-5)": "Rate from 1 to 5 stars",
+        "NIH Scale (1-9)": "Score from 1 (exceptional) to 9 (poor)"
+    }
+    
+    return f"{prompt}\n\nReview Style: {style_map[style]}\n\nRating: {scale_map[rating_scale]}"
 
 def generate_moderator_prompt(all_iterations: List[List[Dict[str, str]]]) -> str:
     """Generate the prompt for the moderator's analysis."""
