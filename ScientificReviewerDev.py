@@ -18,7 +18,7 @@ logging.basicConfig(level=logging.INFO)
 openai_api_key = st.secrets["openai_api_key"]
 client = OpenAI(api_key=openai_api_key)
 
-def create_review_agents(num_agents: int, review_type: str = "paper", include_moderator: bool = False, model_type: str = "gpt4") -> List[Union[ChatOpenAI, Any]]:
+def create_review_agents(num_agents: int, review_type: str = "paper", include_moderator: bool = False, model_type: str = "gpt-4-o1") -> List[Union[ChatOpenAI, Any]]:
     """Create review agents including a moderator if specified."""
     agents = []
     
@@ -33,7 +33,7 @@ def create_review_agents(num_agents: int, review_type: str = "paper", include_mo
             agents.append(model)
     
     if include_moderator and num_agents > 1:
-        if model_type == "gpt4":
+        if model_type == "gpt-4-o1":
             moderator_agent = ChatOpenAI(temperature=0.1, openai_api_key=openai_api_key, model="gpt-4o")
         else:
             moderator_agent = model
@@ -143,7 +143,7 @@ Based on the previous reviews, please:
     return prompt
 
 def process_chunks_with_debate(chunks: List[str], agent: Union[ChatOpenAI, Any], expertise: str, 
-                             prompt: str, iteration: int, model_type: str = "gpt4") -> str:
+                             prompt: str, iteration: int, model_type: str = "gpt-4-o1") -> str:
     """Process multiple chunks of content for a single review iteration."""
     chunk_reviews = []
     
@@ -156,7 +156,7 @@ Content part {i+1}/{len(chunks)}:
 {chunk}"""
 
         try:
-            if model_type == "gpt4":
+            if model_type == "gpt-4-o1":
                 response = agent.invoke([HumanMessage(content=chunk_prompt)])
                 chunk_review = extract_content(response, f"[Error processing chunk {i+1}]")
             else:
@@ -174,7 +174,7 @@ Previous chunk reviews:
 {''.join(chunk_reviews)}"""
 
         try:
-            if model_type == "gpt4":
+            if model_type == "gpt-4-o1":
                 compilation_response = agent.invoke([HumanMessage(content=compilation_prompt)])
                 return extract_content(compilation_response, "[Error compiling final review]")
             else:
@@ -188,7 +188,7 @@ Previous chunk reviews:
 
 def process_reviews_with_debate(content: str, agents: List[Union[ChatOpenAI, Any]], expertises: List[str], 
                               custom_prompts: List[str], review_type: str, num_iterations: int, 
-                              model_type: str = "gpt4", progress_callback=None) -> Dict[str, Any]:
+                              model_type: str = "gpt-4-o1", progress_callback=None) -> Dict[str, Any]:
     """Process reviews with multiple iterations of debate."""
     all_iterations = []
     latest_reviews = []
@@ -237,7 +237,7 @@ def process_reviews_with_debate(content: str, agents: List[Union[ChatOpenAI, Any
     if len(agents) > len(expertises):
         try:
             moderator_prompt = generate_moderator_prompt(all_iterations)
-            if model_type == "gpt4":
+            if model_type == "gpt-4-o1":
                 moderator_response = agents[-1].invoke([HumanMessage(content=moderator_prompt)])
                 moderation_result = extract_content(moderator_response, "[Error in moderation]")
             else:
@@ -333,7 +333,7 @@ def scientific_review_page():
                 num_reviewers, 
                 review_type.lower(), 
                 use_moderator,
-                "gpt4" if model_type == "GPT-4" else "gemini"
+                "gpt-4-o1" if model_type == "GPT-4" else "gemini"
             )
             
             results = process_reviews_with_debate(
@@ -343,7 +343,7 @@ def scientific_review_page():
                 custom_prompts=custom_prompts,
                 review_type=review_type.lower(),
                 num_iterations=num_iterations,
-                model_type="gpt4" if model_type == "GPT-4" else "gemini",
+                model_type="gpt-4-o1" if model_type == "GPT-4" else "gemini",
                 progress_callback=lambda p, s: (progress_bar.progress(int(p)), status_text.text(s))
             )
             
