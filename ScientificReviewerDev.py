@@ -18,24 +18,19 @@ logging.basicConfig(level=logging.INFO)
 openai_api_key = st.secrets["openai_api_key"]
 client = OpenAI(api_key=openai_api_key)
 
-def create_review_agents(num_agents: int, review_type: str = "paper", include_moderator: bool = False, model_type: str = "GPT-4o") -> List[Union[ChatOpenAI, Any]]:
+def create_review_agents(expertises: List[Dict], review_type: str = "paper", include_moderator: bool = False) -> List[Union[ChatOpenAI, Any]]:
     agents = []
     
-    if model_type == "GPT-4o":
-        model = "gpt-4o"
-        for _ in range(num_agents):
-            agents.append(ChatOpenAI(temperature=0.1, openai_api_key=openai_api_key, model=model))
-    else:
-        genai.configure(api_key=st.secrets["gemini_api_key"])
-        model = genai.GenerativeModel("gemini-2.0-flash-exp")
-        for _ in range(num_agents):
-            agents.append(model)
-    
-    if include_moderator and num_agents > 1:
-        if model_type == "GPT-4o":
-            moderator_agent = ChatOpenAI(temperature=0.1, openai_api_key=openai_api_key, model="gpt-4o")
+    for expertise in expertises:
+        if expertise["model"] == "GPT-4o":
+            agent = ChatOpenAI(temperature=0.1, openai_api_key=openai_api_key, model="gpt-4o")
         else:
-            moderator_agent = model
+            genai.configure(api_key=st.secrets["gemini_api_key"])
+            agent = genai.GenerativeModel("gemini-2.0-flash-exp")
+        agents.append(agent)
+    
+    if include_moderator and len(expertises) > 1:
+        moderator_agent = ChatOpenAI(temperature=0.1, openai_api_key=openai_api_key, model="gpt-4o")
         agents.append(moderator_agent)
     
     return agents
@@ -238,6 +233,18 @@ def process_reviews_with_debate(content: str, agents: List[Union[ChatOpenAI, Any
         "success": True
     }
 
+def adjust_prompt_style(prompt: str, style: int) -> str:
+    """Adjust the prompt based on critique style."""
+    style_adjustments = {
+        -2: """Please be extremely thorough and critical in your review. Focus heavily on identifying weaknesses, methodological flaws, and areas needing significant improvement. While acknowledging strengths, emphasize rigorous critique.""",
+        -1: """Maintain high standards in your review. Carefully identify both strengths and weaknesses, with particular attention to areas needing improvement.""",
+        0: """Provide a balanced review that equally considers both strengths and weaknesses. Aim for constructive feedback that acknowledges both positive aspects and areas for improvement.""",
+        1: """While identifying areas for improvement, emphasize the positive aspects and potential of the work. Focus on constructive suggestions rather than criticism.""",
+        2: """Take an encouraging and supportive approach in your review. While noting any critical issues, focus primarily on strengths and positive aspects of the work."""
+    }
+    
+    return f"{prompt}\n\nReview Style: {style_adjustments[style]}"
+
 def generate_moderator_prompt(all_iterations: List[List[Dict[str, str]]]) -> str:
     """Generate the prompt for the moderator's analysis."""
     prompt = """As a senior scientific moderator, analyze the complete review discussion:
@@ -289,7 +296,6 @@ def scientific_review_page():
         st.set_page_config(page_title="Scientific Reviewer", layout="wide")
         st.header("Scientific Review System")
         
-        model_type = st.selectbox("Select Model", ["GPT-4o", "Gemini 2.0 Flash"])
         review_type = st.selectbox("Select Review Type", ["Paper", "Grant", "Poster"])
         num_reviewers = st.number_input("Number of Reviewers", 1, 10, 2)
         num_iterations = st.number_input("Discussion Iterations", 1, 10, 2)
@@ -300,65 +306,81 @@ def scientific_review_page():
         
         with st.expander("Configure Reviewers"):
             for i in range(num_reviewers):
-                col1, col2 = st.columns(2)
+                st.subheader(f"Reviewer {i+1}")
+                col1, col2, col3 = st.columns([1, 2, 1])
                 with col1:
-                    expertise = st.text_input(f"Expertise {i+1}", f"Expert {i+1}")
-                    expertises.append(expertise)
+                    expertise = st.text_input(f"Expertise", value=f"Expert {i+1}", key=f"expertise_{i}")
+                    model_type = st.selectbox("Model", ["GPT-4o", "Gemini 2.0 Flash"], key=f"model_{i}")
                 with col2:
-                    prompt = st.text_area(f"Prompt {i+1}", get_default_prompt(review_type, expertise))
-                    custom_prompts.append(prompt)
+                    prompt = st.text_area("Review Guidelines", value=get_default_prompt(review_type, expertise), key=f"prompt_{i}")
+                with col3:
+                    critique_style = st.slider(
+                        "Critique Style",
+                        min_value=-2,
+                        max_value=2,
+                        value=-1,
+                        help="-2: Extremely harsh, 2: Extremely lenient",
+                        key=f"style_{i}"
+                    )
+                
+                expertises.append({
+                    "name": expertise,
+                    "model": model_type,
+                    "style": critique_style
+                })
+                custom_prompts.append(adjust_prompt_style(prompt, critique_style))
+                st.markdown("---")
         
         uploaded_file = st.file_uploader(f"Upload {review_type} (PDF)", type=["pdf"])
         
         if uploaded_file and st.button("Start Review"):
-            try:
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-                
-                content = extract_pdf_content(uploaded_file)[0]
-                agents = create_review_agents(
-                    num_reviewers, 
-                    review_type.lower(), 
-                    use_moderator,
-                    model_type
-                )
-                
-                results = process_reviews_with_debate(
-                    content=content,
-                    agents=agents,
-                    expertises=expertises,
-                    custom_prompts=custom_prompts,
-                    review_type=review_type.lower(),
-                    num_iterations=num_iterations,
-                    model_type=model_type,
-                    progress_callback=lambda p, s: (progress_bar.progress(int(p)), status_text.text(s))
-                )
-                
-                progress_bar.empty()
-                status_text.empty()
-                st.success("Review completed!")
-                
-                # Display reviews
-                for iteration_idx, iteration_reviews in enumerate(results["all_iterations"]):
-                    st.subheader(f"Iteration {iteration_idx + 1}")
+            review_container = st.container()
+            with review_container:
+                try:
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
                     
-                    for review in iteration_reviews:
-                        with st.expander(f"Review by {review['expertise']}", expanded=True):
-                            if review.get("success", False):
-                                st.markdown(review["review"])
-                            else:
-                                st.error(review["review"])
-                
-                # Display moderator analysis if available
-                if results.get("moderation"):
-                    st.subheader("Final Moderator Analysis")
-                    st.markdown(results["moderation"])
+                    content = extract_pdf_content(uploaded_file)[0]
+                    agents = create_review_agents(expertises, review_type.lower(), use_moderator)
+                    
+                    results = process_reviews_with_debate(
+                        content=content,
+                        agents=agents,
+                        expertises=expertises,
+                        custom_prompts=custom_prompts,
+                        review_type=review_type.lower(),
+                        num_iterations=num_iterations,
+                        progress_callback=lambda p, s: (progress_bar.progress(int(p)), status_text.text(s))
+                    )
+                    
+                    progress_bar.empty()
+                    status_text.empty()
+                    st.success("Review completed!")
+                    
+                    # Display results in tabs for each iteration
+                    if results["all_iterations"]:
+                        tabs = st.tabs([f"Iteration {i+1}" for i in range(len(results["all_iterations"]))])
                         
-            except Exception as e:
-                st.error(f"Review process error: {str(e)}")
-                logging.exception("Error in review process:")
-                if st.checkbox("Debug Mode"):
-                    st.exception(e)
+                        for idx, (tab, iteration_reviews) in enumerate(zip(tabs, results["all_iterations"])):
+                            with tab:
+                                st.subheader(f"Iteration {idx + 1} Reviews")
+                                for review in iteration_reviews:
+                                    with st.expander(f"Review by {review['expertise']['name']}", expanded=True):
+                                        if review.get("success", False):
+                                            st.markdown(review["review"])
+                                        else:
+                                            st.error(review["review"])
+                    
+                    # Display moderator analysis if available
+                    if results.get("moderation"):
+                        st.subheader("Final Moderator Analysis")
+                        st.markdown(results["moderation"])
+                            
+                except Exception as e:
+                    st.error(f"Review process error: {str(e)}")
+                    logging.exception("Error in review process:")
+                    if st.checkbox("Show Debug Info"):
+                        st.exception(e)
                     
     except Exception as e:
         st.error(f"Page initialization error: {str(e)}")
