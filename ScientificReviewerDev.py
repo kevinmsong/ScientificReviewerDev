@@ -294,7 +294,12 @@ def get_default_prompt(review_type: str, expertise: str) -> str:
 def scientific_review_page():
     try:
         st.set_page_config(page_title="Scientific Reviewer", layout="wide")
-        st.header("Scientific Review System")
+        
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            st.header("Scientific Review System")
+        with col2:
+            st.caption("v2.1.0")
         
         review_type = st.selectbox("Select Review Type", ["Paper", "Grant", "Poster"])
         num_reviewers = st.number_input("Number of Reviewers", 1, 10, 2)
