@@ -530,7 +530,7 @@ def scientific_review_page():
         with st.expander("Configure Reviewers"):
             for i in range(num_reviewers):
                 try:
-                    st.subheader(f"Reviewer {i+1}")openai_api_key = st.secrets ["openai_api_key"]
+                    st.subheader(f"Reviewer {i+1}")
                     col1, col2, col3 = st.columns([1, 2, 1])
                     with col1:
                         expertise = st.text_input(f"Expertise", value=f"Expert {i+1}", key=f"expertise_{i}")
