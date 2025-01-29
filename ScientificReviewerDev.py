@@ -299,53 +299,85 @@ def get_default_prompt(review_type: str, expertise: str) -> str:
     return prompts.get(review_type, f"Review this {review_type.lower()}")
 
 def scientific_review_page():
-    st.set_page_config(page_title="Scientific Reviewer", layout="wide")
-    st.header("Scientific Review System")
-    
-    model_type = st.selectbox("Select Model", ["GPT-4o", "Gemini"])
-    review_type = st.selectbox("Select Review Type", ["Paper", "Grant", "Poster"])
-    num_reviewers = st.number_input("Number of Reviewers", 1, 10, 2)
-    num_iterations = st.number_input("Discussion Iterations", 1, 10, 2)
-    use_moderator = st.checkbox("Include Moderator", value=True) if num_reviewers > 1 else False
-    
-    expertises = []
-    custom_prompts = []
-    
-    with st.expander("Configure Reviewers"):
-        for i in range(num_reviewers):
-            col1, col2 = st.columns(2)
-            with col1:
-                expertise = st.text_input(f"Expertise {i+1}", f"Expert {i+1}")
-                expertises.append(expertise)
-            with col2:
-                prompt = st.text_area(f"Prompt {i+1}", get_default_prompt(review_type, expertise))
-                custom_prompts.append(prompt)
-    
-    uploaded_file = st.file_uploader(f"Upload {review_type} (PDF)", type=["pdf"])
-    
-    if uploaded_file and st.button("Start Review"):
-        progress_bar = st.progress(0)
-        status_text = st.empty()
+    try:
+        st.set_page_config(page_title="Scientific Reviewer", layout="wide")
+        st.header("Scientific Review System")
         
-        try:
-            content = extract_pdf_content(uploaded_file)[0]
-            agents = create_review_agents(
-                num_reviewers, 
-                review_type.lower(), 
-                use_moderator,
-                model_type  # Pass the exact model_type
-            )
+        model_type = st.selectbox("Select Model", ["GPT-4o", "Gemini"])
+        review_type = st.selectbox("Select Review Type", ["Paper", "Grant", "Poster"])
+        num_reviewers = st.number_input("Number of Reviewers", 1, 10, 2)
+        num_iterations = st.number_input("Discussion Iterations", 1, 10, 2)
+        use_moderator = st.checkbox("Include Moderator", value=True) if num_reviewers > 1 else False
+        
+        expertises = []
+        custom_prompts = []
+        
+        with st.expander("Configure Reviewers"):
+            for i in range(num_reviewers):
+                col1, col2 = st.columns(2)
+                with col1:
+                    expertise = st.text_input(f"Expertise {i+1}", f"Expert {i+1}")
+                    expertises.append(expertise)
+                with col2:
+                    prompt = st.text_area(f"Prompt {i+1}", get_default_prompt(review_type, expertise))
+                    custom_prompts.append(prompt)
+        
+        uploaded_file = st.file_uploader(f"Upload {review_type} (PDF)", type=["pdf"])
+        
+        if uploaded_file and st.button("Start Review"):
+            progress_bar = st.progress(0)
+            status_text = st.empty()
             
-            results = process_reviews_with_debate(
-                content=content,
-                agents=agents,
-                expertises=expertises,
-                custom_prompts=custom_prompts,
-                review_type=review_type.lower(),
-                num_iterations=num_iterations,
-                model_type=model_type,  # Pass the exact model_type
-                progress_callback=lambda p, s: (progress_bar.progress(int(p)), status_text.text(s))
-            )
+            try:
+                content = extract_pdf_content(uploaded_file)[0]
+                agents = create_review_agents(
+                    num_reviewers, 
+                    review_type.lower(), 
+                    use_moderator,
+                    model_type
+                )
+                
+                results = process_reviews_with_debate(
+                    content=content,
+                    agents=agents,
+                    expertises=expertises,
+                    custom_prompts=custom_prompts,
+                    review_type=review_type.lower(),
+                    num_iterations=num_iterations,
+                    model_type=model_type,
+                    progress_callback=lambda p, s: (progress_bar.progress(int(p)), status_text.text(s))
+                )
+                
+                progress_bar.empty()
+                status_text.empty()
+                st.success("Review completed!")
+                
+                # Display results
+                for iteration_idx, iteration_reviews in enumerate(results["all_iterations"], 1):
+                    st.subheader(f"Iteration {iteration_idx}")
+                    for review in iteration_reviews:
+                        with st.expander(f"Review by {review['expertise']}", expanded=True):
+                            if review.get("success", False):
+                                st.write(review['review'])
+                            else:
+                                st.error(review['review'])
+                
+                if results["moderation"]:
+                    st.subheader("Moderator Analysis")
+                    st.write(results["moderation"])
+                    
+            except Exception as e:
+                st.error(f"Review process error: {str(e)}")
+                if st.checkbox("Debug Mode"):
+                    st.exception(e)
+                    
+    except Exception as e:
+        st.error(f"Page initialization error: {str(e)}")
+        logging.exception("Error in scientific_review_page:")
 
 if __name__ == "__main__":
-    scientific_review_page()
+    try:
+        scientific_review_page()
+    except Exception as e:
+        st.error(f"Error: {str(e)}")
+        logging.exception("Error in main:")
