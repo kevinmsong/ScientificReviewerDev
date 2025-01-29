@@ -300,7 +300,7 @@ def get_default_prompt(review_type: str, expertise: str) -> str:
 
 def scientific_review_page():
     st.set_page_config(page_title="Scientific Reviewer", layout="wide")
-    st.header("Multi-Agent Scientific Review System")
+    st.header("Scientific Review System")
     
     model_type = st.selectbox("Select Model", ["o1", "Gemini"])
     review_type = st.selectbox("Select Review Type", ["Paper", "Grant", "Poster"])
