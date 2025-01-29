@@ -175,59 +175,171 @@ Content part {i+1}/{len(chunks)}:
     
     return chunk_reviews[0]
 
+def generate_debate_summary(reviews: List[Dict], expertise: str) -> str:
+    """Generate a summary prompt for expert dialogue."""
+    summary = f"Previous reviews for discussion:\n\n"
+    for review in reviews:
+        if review["success"]:
+            summary += f"Review by {review['expertise']['name']}:\n"
+            summary += f"{review['review']}\n\n"
+    
+    prompt = f"""As {expertise}, analyze the preceding reviews and engage in a scholarly dialogue:
+
+1. Key Points Analysis
+- Identify the main arguments and findings
+- Assess methodological critiques
+- Evaluate evidence quality
+
+2. Response to Other Reviewers
+- Address specific points raised by others
+- Support or challenge their assessments
+- Provide additional context or perspectives
+
+3. Synthesis
+- Areas of consensus
+- Key disagreements
+- Final assessment
+
+Keep responses focused and evidence-based."""
+    
+    return summary + prompt
+
 def process_reviews_with_debate(content: str, agents: List[Union[ChatOpenAI, Any]], expertises: List[Dict], 
                               custom_prompts: List[str], review_type: str, num_iterations: int, 
                               progress_callback=None) -> Dict[str, Any]:
     all_iterations = []
     latest_reviews = []
+    tabs = st.tabs([f"Iteration {i+1}" for i in range(num_iterations)] + ["Final Analysis"])
     
     for iteration in range(num_iterations):
-        review_results = []
-        st.write(f"Starting iteration {iteration + 1}")
-        
-        for i, (agent, expertise, base_prompt) in enumerate(zip(agents[:-1] if len(agents) > len(expertises) else agents, expertises, custom_prompts)):
-            processing_msg = st.empty()
-            processing_msg.info(f"Processing review from {expertise['name']}...")
+        with tabs[iteration]:
+            st.write(f"Starting iteration {iteration + 1}")
+            review_results = []
+            
+            # Initial reviews
+            for i, (agent, expertise, base_prompt) in enumerate(zip(agents[:-1] if len(agents) > len(expertises) else agents, expertises, custom_prompts)):
+                review_container = st.container()
+                with review_container:
+                    processing_msg = st.empty()
+                    processing_msg.info(f"Processing review from {expertise['name']}...")
+                    try:
+                        debate_prompt = get_debate_prompt(expertise['name'], iteration + 1, latest_reviews, review_type)
+                        full_prompt = f"{base_prompt}\n\n{debate_prompt}"
+                        
+                        review_text = process_chunks_with_debate(
+                            chunks=chunk_content(content),
+                            agent=agent,
+                            expertise=expertise,
+                            prompt=full_prompt,
+                            iteration=iteration + 1,
+                            model_type=expertise['model']
+                        )
+                        
+                        review_results.append({
+                            "expertise": expertise,
+                            "review": review_text,
+                            "iteration": iteration + 1,
+                            "success": True
+                        })
+                        
+                        processing_msg.empty()
+                        with st.expander(f"Initial Review by {expertise['name']} ({expertise['model']})", expanded=True):
+                            st.markdown(review_text)
+                            st.caption(f"Critique Style: {expertise['style']}")
+                            
+                    except Exception as e:
+                        logging.error(f"Error processing agent {expertise}: {str(e)}")
+                        review_results.append({
+                            "expertise": expertise,
+                            "review": f"Error: {str(e)}",
+                            "iteration": iteration + 1,
+                            "success": False
+                        })
+                        processing_msg.error(f"Error processing review from {expertise['name']}")
+            
+            # Expert dialogue
+            st.subheader("Expert Dialogue")
+            for expertise, agent in zip(expertises, agents[:-1] if len(agents) > len(expertises) else agents):
+                try:
+                    dialogue_prompt = generate_debate_summary(review_results, expertise['name'])
+                    if expertise['model'] == "GPT-4o":
+                        response = agent.invoke([HumanMessage(content=dialogue_prompt)])
+                        dialogue = extract_content(response, "[Error in dialogue]")
+                    else:
+                        response = agent.generate_content(dialogue_prompt)
+                        dialogue = response.text
+                        
+                    with st.expander(f"Response from {expertise['name']}", expanded=True):
+                        st.markdown(dialogue)
+                        
+                    review_results[next(i for i, r in enumerate(review_results) if r["expertise"]["name"] == expertise["name"])]["dialogue"] = dialogue
+                        
+                except Exception as e:
+                    st.error(f"Error in dialogue for {expertise['name']}: {str(e)}")
+            
+            all_iterations.append(review_results)
+            latest_reviews = review_results
+            st.success(f"Completed iteration {iteration + 1}")
+
+    # Moderator analysis
+    if len(agents) > len(expertises):
+        with tabs[-1]:
+            st.subheader("Moderator Analysis")
+            moderator_agent = agents[-1]
+            
             try:
-                debate_prompt = get_debate_prompt(expertise['name'], iteration + 1, latest_reviews, review_type)
-                full_prompt = f"{base_prompt}\n\n{debate_prompt}"
+                analysis = generate_moderator_analysis(all_iterations)
+                if isinstance(moderator_agent, ChatOpenAI):
+                    response = moderator_agent.invoke([HumanMessage(content=analysis)])
+                    moderation = extract_content(response, "[Error in moderation]")
+                else:
+                    response = moderator_agent.generate_content(analysis)
+                    moderation = response.text
                 
-                review_text = process_chunks_with_debate(
-                    chunks=chunk_content(content),
-                    agent=agent,
-                    expertise=expertise,
-                    prompt=full_prompt,
-                    iteration=iteration + 1,
-                    model_type=expertise['model']
-                )
-                
-                review_results.append({
-                    "expertise": expertise,
-                    "review": review_text,
-                    "iteration": iteration + 1,
-                    "success": True
-                })
-                processing_msg.success(f"Completed review from {expertise['name']}")
+                st.markdown(moderation)
                 
             except Exception as e:
-                logging.error(f"Error processing agent {expertise}: {str(e)}")
-                review_results.append({
-                    "expertise": expertise,
-                    "review": f"Error: {str(e)}",
-                    "iteration": iteration + 1,
-                    "success": False
-                })
-                processing_msg.error(f"Error processing review from {expertise['name']}")
-        
-        all_iterations.append(review_results)
-        latest_reviews = review_results
-        st.write(f"Completed iteration {iteration + 1}")
+                st.error(f"Error in moderation: {str(e)}")
 
     return {
         "all_iterations": all_iterations,
-        "moderation": None,
         "success": True
     }
+
+def generate_moderator_analysis(all_iterations: List[List[Dict]]) -> str:
+    summary = "Complete review discussion for analysis:\n\n"
+    
+    for iteration_idx, iteration_reviews in enumerate(all_iterations, 1):
+        summary += f"\nIteration {iteration_idx}:\n"
+        for review in iteration_reviews:
+            if review.get("success", False):
+                summary += f"\nReview by {review['expertise']['name']}:\n{review['review']}\n"
+                if "dialogue" in review:
+                    summary += f"\nDialogue contribution:\n{review['dialogue']}\n"
+    
+    prompt = """As a scientific moderator, provide a comprehensive analysis:
+
+1. Evolution of Discussion
+- How perspectives evolved across iterations
+- Key points of agreement/disagreement
+- Quality of scientific discourse
+
+2. Review Quality Assessment
+- Rigor of arguments
+- Evidence quality
+- Constructiveness of dialogue
+
+3. Final Synthesis
+- Critical consensus points
+- Unresolved debates
+- Priority recommendations
+
+4. Recommendation
+- Overall assessment
+- Decision recommendation
+- Key action items"""
+    
+    return summary + "\n\n" + prompt
 
 def adjust_prompt_style(prompt: str, style: int) -> str:
     """Adjust the prompt based on critique style."""
