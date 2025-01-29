@@ -189,9 +189,10 @@ Previous chunk reviews:
 def process_reviews_with_debate(content: str, agents: List[Union[ChatOpenAI, Any]], expertises: List[str], 
                               custom_prompts: List[str], review_type: str, num_iterations: int, 
                               model_type: str = "gpt-4o", progress_callback=None) -> Dict[str, Any]:
-    """Process reviews with multiple iterations of debate."""
     all_iterations = []
     latest_reviews = []
+    
+    logging.info(f"Starting review process with {num_iterations} iterations")
     
     for iteration in range(num_iterations):
         review_results = []
@@ -214,6 +215,8 @@ def process_reviews_with_debate(content: str, agents: List[Union[ChatOpenAI, Any
                     model_type=model_type
                 )
                 
+                logging.info(f"Got review from {expertise} for iteration {iteration + 1}")
+                
                 review_results.append({
                     "expertise": expertise,
                     "review": review_text,
@@ -232,24 +235,11 @@ def process_reviews_with_debate(content: str, agents: List[Union[ChatOpenAI, Any
         
         all_iterations.append(review_results)
         latest_reviews = review_results
-    
-    moderation_result = None
-    if len(agents) > len(expertises):
-        try:
-            moderator_prompt = generate_moderator_prompt(all_iterations)
-            if model_type == "gpt-4o":
-                moderator_response = agents[-1].invoke([HumanMessage(content=moderator_prompt)])
-                moderation_result = extract_content(moderator_response, "[Error in moderation]")
-            else:
-                moderator_response = agents[-1].generate_content(moderator_prompt)
-                moderation_result = moderator_response.text
-        except Exception as e:
-            logging.error(f"Moderation error: {str(e)}")
-            moderation_result = f"Error in moderation: {str(e)}"
+        logging.info(f"Completed iteration {iteration + 1}")
     
     return {
         "all_iterations": all_iterations,
-        "moderation": moderation_result
+        "moderation": None
     }
 
 def generate_moderator_prompt(all_iterations: List[List[Dict[str, str]]]) -> str:
@@ -309,18 +299,6 @@ def scientific_review_page():
         num_iterations = st.number_input("Discussion Iterations", 1, 10, 2)
         use_moderator = st.checkbox("Include Moderator", value=True) if num_reviewers > 1 else False
         
-        review_containers = {}
-        iteration_containers = []
-        
-        # Initialize containers for each iteration
-        for iteration in range(num_iterations):
-            iteration_header = st.subheader(f"Iteration {iteration + 1}")
-            iteration_container = st.container()
-            iteration_containers.append({
-                "header": iteration_header,
-                "container": iteration_container
-            })
-        
         expertises = []
         custom_prompts = []
         
@@ -330,26 +308,17 @@ def scientific_review_page():
                 with col1:
                     expertise = st.text_input(f"Expertise {i+1}", f"Expert {i+1}")
                     expertises.append(expertise)
-                    # Initialize reviewer containers
-                    if expertise not in review_containers:
-                        review_containers[expertise] = []
                 with col2:
                     prompt = st.text_area(f"Prompt {i+1}", get_default_prompt(review_type, expertise))
                     custom_prompts.append(prompt)
-                
-                # Create empty containers for each reviewer in each iteration
-                for iteration_data in iteration_containers:
-                    with iteration_data["container"]:
-                        reviewer_container = st.empty()
-                        review_containers[expertise].append(reviewer_container)
         
         uploaded_file = st.file_uploader(f"Upload {review_type} (PDF)", type=["pdf"])
         
         if uploaded_file and st.button("Start Review"):
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-            
             try:
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+                
                 content = extract_pdf_content(uploaded_file)[0]
                 agents = create_review_agents(
                     num_reviewers, 
@@ -373,30 +342,36 @@ def scientific_review_page():
                 status_text.empty()
                 st.success("Review completed!")
                 
-                # Update UI with results
-                for iteration in range(num_iterations):
-                    for i, (expertise, review) in enumerate(zip(expertises, results["all_iterations"][iteration])):
-                        with review_containers[expertise][iteration].container():
-                            if review.get("success", False):
-                                st.write(f"Review by {expertise}")
+                logging.info("Processing results")
+                logging.info(f"Number of iterations: {len(results['all_iterations'])}")
+                
+                # Display reviews
+                results_container = st.container()
+                with results_container:
+                    for iteration_idx, iteration_reviews in enumerate(results["all_iterations"]):
+                        st.subheader(f"Iteration {iteration_idx + 1}")
+                        logging.info(f"Processing iteration {iteration_idx + 1}")
+                        logging.info(f"Reviews in iteration: {len(iteration_reviews)}")
+                        
+                        cols = st.columns(len(iteration_reviews))
+                        for col, review in zip(cols, iteration_reviews):
+                            with col:
+                                st.markdown(f"**Review by {review['expertise']}**")
+                                if review.get("success", False):
+                                    st.markdown(review["review"])
+                                else:
+                                    st.error(review["review"])
                                 st.markdown("---")
-                                sections = review["review"].split('\n\n')
-                                for section in sections:
-                                    st.write(section.strip())
-                                    st.markdown("---")
-                            else:
-                                st.error(review["review"])
                 
                 # Display moderator analysis if available
                 if results.get("moderation"):
-                    st.subheader("Final Moderator Analysis")
-                    sections = results["moderation"].split('\n\n')
-                    for section in sections:
-                        st.write(section.strip())
-                        st.markdown("---")
-                    
+                    with results_container:
+                        st.subheader("Final Moderator Analysis")
+                        st.markdown(results["moderation"])
+                        
             except Exception as e:
                 st.error(f"Review process error: {str(e)}")
+                logging.exception("Error in review process:")
                 if st.checkbox("Debug Mode"):
                     st.exception(e)
                     
