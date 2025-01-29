@@ -11,6 +11,7 @@ from typing import List, Dict, Any, Tuple, Union
 import tiktoken
 import time
 import google.generativeai as genai
+import re
 
 logging.basicConfig(level=logging.INFO)
 
@@ -103,6 +104,33 @@ def extract_pdf_content(pdf_file) -> Tuple[str, List[Image.Image]]:
             images.append(image)
     
     return text_content, images
+
+def get_score_description(rating_scale: str, score: int) -> str:
+    """Provide description for different rating scales."""
+    descriptions = {
+        "Paper Score (-2 to 2)": {
+            -2: "Fundamentally Flawed",
+            -1: "Significant Concerns",
+            0: "Average",
+            1: "Strong Potential",
+            2: "Exceptional"
+        },
+        "Star Rating (1-5)": {
+            1: "Poor",
+            2: "Below Average",
+            3: "Average",
+            4: "Good",
+            5: "Excellent"
+        },
+        "NIH Scale (1-9)": {
+            1: "Exceptional",
+            3: "Highly Meritorious",
+            5: "Competitive",
+            7: "Marginal",
+            9: "Poor"
+        }
+    }
+    return descriptions.get(rating_scale, {}).get(score, "N/A")
 
 def get_debate_prompt(expertise: str, iteration: int, previous_reviews: List[Dict[str, str]], topic: str) -> str:
     """Generate a debate-style prompt for reviewers."""
@@ -254,14 +282,15 @@ def process_reviews_with_debate(content: str, agents: List[Union[ChatOpenAI, Any
                             with col1:
                                 st.caption(f"Critique Style: {expertise['style']}")
                             with col2:
-                                if "score" in review_text.lower():
+                                # Improved score parsing
+                                score_matches = re.findall(r'score[:\s]*(-?\d+\.?\d*)', review_text.lower())
+                                if score_matches:
                                     try:
-                                        score_text = review_text.lower().split("score:")[-1].split("\n")[0].strip()
-                                        score = float(next(s for s in score_text.split() if s.replace('.','').isdigit()))
-                                        description = get_score_description(rating_scale, int(score))
+                                        score = float(score_matches[0])
                                         if rating_scale == "Star Rating (1-5)":
                                             st.write("⭐" * int(score))
                                         else:
+                                            description = get_score_description(rating_scale, round(score))
                                             st.write(f"Score: {score} - {description}")
                                     except Exception as e:
                                         logging.warning(f"Could not parse score: {e}")
@@ -298,6 +327,53 @@ def process_reviews_with_debate(content: str, agents: List[Union[ChatOpenAI, Any
             all_iterations.append(review_results)
             latest_reviews = review_results
             st.success(f"Completed iteration {iteration + 1}")
+
+        with tabs[-1]:  # Last tab is "Final Analysis"
+        st.subheader("Comprehensive Review Summary")
+        
+        # Aggregate scores
+        scores = []
+        for iteration in all_iterations:
+            for review in iteration:
+                if review.get("success"):
+                    score_matches = re.findall(r'score[:\s]*(-?\d+\.?\d*)', review['review'].lower())
+                    if score_matches:
+                        try:
+                            scores.append(float(score_matches[0]))
+                        except:
+                            pass
+        
+        if scores:
+            avg_score = sum(scores) / len(scores)
+            st.metric("Average Score", f"{avg_score:.2f}")
+            st.write(f"Description: {get_score_description(rating_scale, round(avg_score))}")
+        
+        # Moderator analysis (if moderator is used)
+        if len(agents) > len(expertises):
+            try:
+                moderator_prompt = generate_moderator_analysis(all_iterations)
+                moderator_agent = agents[-1]  # Last agent is the moderator
+                
+                if expertise['model'] == "GPT-4o":
+                    moderator_response = moderator_agent.invoke([HumanMessage(content=moderator_prompt)])
+                    moderator_analysis = extract_content(moderator_response, "[Error in moderator analysis]")
+                else:
+                    moderator_response = moderator_agent.generate_content(moderator_prompt)
+                    moderator_analysis = moderator_response.text
+                
+                st.subheader("Moderator's Final Analysis")
+                st.markdown(moderator_analysis)
+            except Exception as e:
+                st.error(f"Error in moderator analysis: {str(e)}")
+        
+        # Detailed iteration summaries
+        st.subheader("Iteration Summaries")
+        for i, iteration in enumerate(all_iterations, 1):
+            with st.expander(f"Iteration {i} Summary"):
+                for review in iteration:
+                    if review.get("success"):
+                        st.markdown(f"**Review by {review['expertise']['name']}**")
+                        st.markdown(review['review'])
 
     return {
         "all_iterations": all_iterations,
