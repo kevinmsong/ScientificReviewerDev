@@ -186,19 +186,18 @@ def process_reviews_with_debate(content: str, agents: List[Union[ChatOpenAI, Any
     logging.info(f"Starting process_reviews_with_debate")
     logging.info(f"Model type: {model_type}")
     logging.info(f"Number of agents: {len(agents)}")
-    logging.info(f"Number of expertises: {len(expertises)}")
     
     all_iterations = []
     latest_reviews = []
     
     for iteration in range(num_iterations):
         review_results = []
-        logging.info(f"Starting iteration {iteration + 1}")
+        st.write(f"Starting iteration {iteration + 1}")
         
-        # Changed this line to use all agents except moderator
         for i, (agent, expertise, base_prompt) in enumerate(zip(agents[:-1] if len(agents) > len(expertises) else agents, expertises, custom_prompts)):
+            processing_msg = st.empty()
+            processing_msg.info(f"Processing review from {expertise}...")
             try:
-                logging.info(f"Processing agent {expertise}")
                 debate_prompt = get_debate_prompt(expertise, iteration + 1, latest_reviews, review_type)
                 full_prompt = f"{base_prompt}\n\n{debate_prompt}"
                 
@@ -207,17 +206,17 @@ def process_reviews_with_debate(content: str, agents: List[Union[ChatOpenAI, Any
                     agent=agent,
                     expertise=expertise,
                     prompt=full_prompt,
-                    iteration=iteration + 1, 
+                    iteration=iteration + 1,
                     model_type=model_type
                 )
                 
-                logging.info(f"Got review from {expertise}")
                 review_results.append({
                     "expertise": expertise,
                     "review": review_text,
                     "iteration": iteration + 1,
                     "success": True
                 })
+                processing_msg.success(f"Completed review from {expertise}")
                 
             except Exception as e:
                 logging.error(f"Error processing agent {expertise}: {str(e)}")
@@ -227,11 +226,11 @@ def process_reviews_with_debate(content: str, agents: List[Union[ChatOpenAI, Any
                     "iteration": iteration + 1,
                     "success": False
                 })
+                processing_msg.error(f"Error processing review from {expertise}")
         
         all_iterations.append(review_results)
         latest_reviews = review_results
-        logging.info(f"Completed iteration {iteration + 1}")
-        logging.info(f"Number of reviews in iteration: {len(review_results)}")
+        st.write(f"Completed iteration {iteration + 1}")
 
     return {
         "all_iterations": all_iterations,
