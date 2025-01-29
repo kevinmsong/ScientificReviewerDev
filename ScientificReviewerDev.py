@@ -175,32 +175,38 @@ Content part {i+1}/{len(chunks)}:
     
     return chunk_reviews[0]
 
-def generate_debate_summary(reviews: List[Dict], expertise: str) -> str:
+def generate_debate_summary(reviews: List[Dict], expertise: str, rating_scale: str) -> str:
     """Generate a summary prompt for expert dialogue."""
-    summary = f"Previous reviews for discussion:\n\n"
+    summary = "Previous reviews for discussion:\n\n"
     for review in reviews:
         if review["success"]:
             summary += f"Review by {review['expertise']['name']}:\n"
             summary += f"{review['review']}\n\n"
     
-    prompt = f"""As {expertise}, analyze the preceding reviews and engage in a scholarly dialogue:
+    scale_info = {
+        "Paper Score (-2 to 2)": "(-2: worst, 2: best)",
+        "Star Rating (1-5)": "(1-5 stars)",
+        "NIH Scale (1-9)": "(1: exceptional, 9: poor)"
+    }
+    
+    prompt = f"""As {expertise}, analyze the reviews and provide:
 
-1. Key Points Analysis
-- Identify the main arguments and findings
-- Assess methodological critiques
-- Evaluate evidence quality
+1. Response to Reviews
+- Address key points and critiques
+- Discuss methodology assessments
+- Evaluate conclusions
 
-2. Response to Other Reviewers
-- Address specific points raised by others
-- Support or challenge their assessments
-- Provide additional context or perspectives
+2. Comparative Analysis
+- Areas of agreement/disagreement
+- Evidence assessment
+- Methodology considerations
 
-3. Synthesis
-- Areas of consensus
-- Key disagreements
-- Moderator assessment
+3. Final Assessment
+- Updated evaluation using {rating_scale} {scale_info[rating_scale]}
+- Recommendations
+- Critical considerations
 
-Keep responses focused and evidence-based."""
+Base all responses on evidence and specific points from the reviews."""
     
     return summary + prompt
 
@@ -243,7 +249,7 @@ def process_reviews_with_debate(content: str, agents: List[Union[ChatOpenAI, Any
                         })
                         
                         processing_msg.empty()
-                        with st.expander(f"Initial Review by {expertise['name']} ({expertise['model']})", expanded=True):
+                        with st.expander(f"Review by {expertise['name']} ({expertise['model']})", expanded=True):
                             st.markdown(review_text)
                             st.caption(f"Critique Style: {expertise['style']}")
                             
@@ -402,99 +408,64 @@ def get_default_prompt(review_type: str, expertise: str) -> str:
 def scientific_review_page():
     try:
         st.set_page_config(page_title="Scientific Reviewer", layout="wide")
-        
         st.header("Scientific Review System")
         st.caption("v2.1.0")
         
-        review_type = st.selectbox("Select Review Type", ["Paper", "Grant", "Poster"])
-        num_reviewers = st.number_input("Number of Reviewers", 1, 10, 2)
-        num_iterations = st.number_input("Discussion Iterations", 1, 10, 2)
-        use_moderator = st.checkbox("Include Moderator", value=True) if num_reviewers > 1 else False
+        col1, col2 = st.columns([2,1])
+        with col1:
+            rating_scale = st.radio(
+                "Rating Scale",
+                ["Paper Score (-2 to 2)", "Star Rating (1-5)", "NIH Scale (1-9)"],
+                help="Paper: -2 (worst) to 2 (best)\nStar: 1-5 stars\nNIH: 1 (best) to 9 (worst)"
+            )
         
-        expertises = []
-        custom_prompts = []
+        def get_score_description(scale: str, score: Union[int, float]) -> str:
+            descriptions = {
+                "Paper Score (-2 to 2)": {
+                    -2: "Major flaws, rejection recommended",
+                    -1: "Significant revisions needed",
+                    0: "Moderate revisions needed",
+                    1: "Minor revisions needed",
+                    2: "Accept as is"
+                },
+                "Star Rating (1-5)": {
+                    1: "Poor",
+                    2: "Fair",
+                    3: "Good",
+                    4: "Very Good",
+                    5: "Excellent"
+                },
+                "NIH Scale (1-9)": {
+                    1: "Exceptional",
+                    2: "Outstanding",
+                    3: "Excellent",
+                    4: "Very Good",
+                    5: "Good",
+                    6: "Satisfactory",
+                    7: "Fair",
+                    8: "Marginal",
+                    9: "Poor"
+                }
+            }
+            return descriptions[scale].get(score, "")
         
-        with st.expander("Configure Reviewers"):
-            for i in range(num_reviewers):
-                st.subheader(f"Reviewer {i+1}")
-                col1, col2, col3 = st.columns([1, 2, 1])
-                with col1:
-                    expertise = st.text_input(f"Expertise", value=f"Expert {i+1}", key=f"expertise_{i}")
-                    model_type = st.selectbox("Model", ["GPT-4o", "Gemini 2.0 Flash"], key=f"model_{i}")
-                with col2:
-                    prompt = st.text_area("Review Guidelines", value=get_default_prompt(review_type, expertise), key=f"prompt_{i}")
-                with col3:
-                    critique_style = st.slider(
-                        "Critique Style",
-                        min_value=-2,
-                        max_value=2,
-                        value=-1,
-                        help="-2: Extremely harsh, 2: Extremely lenient",
-                        key=f"style_{i}"
-                    )
-                
-                expertises.append({
-                    "name": expertise,
-                    "model": model_type,
-                    "style": critique_style
-                })
-                custom_prompts.append(adjust_prompt_style(prompt, critique_style))
-                st.markdown("---")
-        
-        uploaded_file = st.file_uploader(f"Upload {review_type} (PDF)", type=["pdf"])
-        
-        if uploaded_file and st.button("Start Review"):
-            review_container = st.container()
-            with review_container:
-                try:
-                    progress_bar = st.progress(0)
-                    status_text = st.empty()
-                    
-                    content = extract_pdf_content(uploaded_file)[0]
-                    agents = create_review_agents(expertises, review_type.lower(), use_moderator)
-                    
-                    results = process_reviews_with_debate(
-                        content=content,
-                        agents=agents,
-                        expertises=expertises,
-                        custom_prompts=custom_prompts,
-                        review_type=review_type.lower(),
-                        num_iterations=num_iterations,
-                        progress_callback=lambda p, s: (progress_bar.progress(int(p)), status_text.text(s))
-                    )
-                    
-                    progress_bar.empty()
-                    status_text.empty()
-                    st.success("Review completed!")
-                    
-                    # Display results in tabs for each iteration
-                    if results["all_iterations"]:
-                        tabs = st.tabs([f"Iteration {i+1}" for i in range(len(results["all_iterations"]))])
-                        
-                        for idx, (tab, iteration_reviews) in enumerate(zip(tabs, results["all_iterations"])):
-                            with tab:
-                                st.subheader(f"Iteration {idx + 1} Reviews")
-                                for review in iteration_reviews:
-                                    with st.expander(f"Review by {review['expertise']['name']}", expanded=True):
-                                        if review.get("success", False):
-                                            st.markdown(review["review"])
-                                        else:
-                                            st.error(review["review"])
-                    
-                    # Display moderator analysis if available
-                    if results.get("moderation"):
-                        st.subheader("Moderator Analysis")
-                        st.markdown(results["moderation"])
-                            
-                except Exception as e:
-                    st.error(f"Review process error: {str(e)}")
-                    logging.exception("Error in review process:")
-                    if st.checkbox("Show Debug Info"):
-                        st.exception(e)
-                    
-    except Exception as e:
-        st.error(f"Page initialization error: {str(e)}")
-        logging.exception("Error in scientific_review_page:")
+        def adjust_prompt_style(prompt: str, style: int, rating_scale: str) -> str:
+            """Adjust prompt based on critique style and rating scale."""
+            style_adjustments = {
+                -2: "Be extremely thorough and critical. Focus on weaknesses and flaws.",
+                -1: "Maintain high standards. Carefully identify both strengths and weaknesses.",
+                0: "Provide balanced review of strengths and weaknesses.",
+                1: "Emphasize positive aspects while noting necessary improvements.",
+                2: "Take an encouraging approach while noting critical issues."
+            }
+            
+            scale_instructions = {
+                "Paper Score (-2 to 2)": "Score from -2 (worst) to 2 (best)",
+                "Star Rating (1-5)": "Rate from 1 to 5 stars",
+                "NIH Scale (1-9)": "Score from 1 (exceptional) to 9 (poor)"
+            }
+            
+            return f"{prompt}\n\nReview Style: {style_adjustments[style]}\n\nRating: {scale_instructions[rating_scale]}"
 
 if __name__ == "__main__":
     try:
