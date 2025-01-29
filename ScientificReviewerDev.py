@@ -302,7 +302,7 @@ def scientific_review_page():
     st.set_page_config(page_title="Multi-Agent Scientific Review", layout="wide")
     st.header("Multi-Agent Scientific Review System")
     
-    model_type = st.selectbox("Select Model", ["GPT-4", "Gemini"])
+    model_type = st.selectbox("Select Model", ["o1", "Gemini"])
     review_type = st.selectbox("Select Review Type", ["Paper", "Grant", "Poster"])
     num_reviewers = st.number_input("Number of Reviewers", 1, 10, 2)
     num_iterations = st.number_input("Discussion Iterations", 1, 10, 2)
