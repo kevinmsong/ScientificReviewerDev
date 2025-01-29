@@ -265,7 +265,7 @@ def process_reviews_with_debate(content: str, agents: List[Union[ChatOpenAI, Any
                               rating_scale: str = "Paper Score (-2 to 2)", progress_callback=None) -> Dict[str, Any]:
     all_iterations = []
     latest_reviews = []
-    tabs = st.tabs([f"Iteration {i+1}" for i in range(num_iterations)] + ["Final Analysis"])
+    tabs = st.tabs([f"Iteration {i+1}" for i in range(num_iterations)] + ["Moderator Analysis"])
     
     for iteration in range(num_iterations):
         with tabs[iteration]:
@@ -345,8 +345,8 @@ def process_reviews_with_debate(content: str, agents: List[Union[ChatOpenAI, Any
             latest_reviews = review_results
             st.success(f"Completed iteration {iteration + 1}")
 
-    # Final Analysis tab handling
-    with tabs[-1]:  # Last tab is "Final Analysis"
+    # Moderator Analysis tab handling
+    with tabs[-1]:  # Last tab is "Moderator Analysis"
         st.subheader("Comprehensive Review Summary")
         
         # Aggregate scores
@@ -383,7 +383,7 @@ def process_reviews_with_debate(content: str, agents: List[Union[ChatOpenAI, Any
                     moderator_response = moderator_agent.generate_content(moderator_prompt)
                     moderator_analysis = moderator_response.text
                 
-                st.subheader("Moderator's Final Analysis")
+                st.subheader("Moderator's Moderator Analysis")
                 st.markdown(moderator_analysis)
             except Exception as e:
                 st.error(f"Error in moderator analysis: {str(e)}")
