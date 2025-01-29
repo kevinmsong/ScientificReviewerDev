@@ -19,7 +19,6 @@ openai_api_key = st.secrets["openai_api_key"]
 client = OpenAI(api_key=openai_api_key)
 
 def create_review_agents(num_agents: int, review_type: str = "paper", include_moderator: bool = False, model_type: str = "GPT-4o") -> List[Union[ChatOpenAI, Any]]:
-    """Create review agents including a moderator if specified."""
     agents = []
     
     if model_type == "GPT-4o":
@@ -309,7 +308,7 @@ def scientific_review_page():
         num_reviewers = st.number_input("Number of Reviewers", 1, 10, 2)
         num_iterations = st.number_input("Discussion Iterations", 1, 10, 2)
         use_moderator = st.checkbox("Include Moderator", value=True) if num_reviewers > 1 else False
-        import time
+        
         expertises = []
         custom_prompts = []
         
@@ -335,7 +334,7 @@ def scientific_review_page():
                     num_reviewers, 
                     review_type.lower(), 
                     use_moderator,
-                    model_typemodel_type
+                    model_type
                 )
                 
                 results = process_reviews_with_debate(
