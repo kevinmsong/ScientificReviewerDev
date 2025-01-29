@@ -22,7 +22,7 @@ def create_review_agents(num_agents: int, review_type: str = "paper", include_mo
     """Create review agents including a moderator if specified."""
     agents = []
     
-    if model_type == "gpt4":
+    if model_type == "o1":
         model = "gpt-4-o1"
         for _ in range(num_agents):
             agents.append(ChatOpenAI(temperature=0.1, openai_api_key=openai_api_key, model=model))
@@ -325,7 +325,7 @@ def scientific_review_page():
     
     if uploaded_file and st.button("Start Review"):
         progress_bar = st.progress(0)
-        status_text = st.empty()
+        status_text = st.empty()status_text = st.empty()
         
         try:
             content = extract_pdf_content(uploaded_file)[0]
