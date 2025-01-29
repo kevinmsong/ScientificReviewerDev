@@ -2,7 +2,7 @@ import streamlit as st
 import logging
 from openai import OpenAI
 from langchain_openai import ChatOpenAI
-from langchain.schema import HumanMessage
+from langchain_core.messages import HumanMessage
 import fitz
 import io
 from PIL import Image
