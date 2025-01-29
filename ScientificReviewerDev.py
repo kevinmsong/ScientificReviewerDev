@@ -212,17 +212,16 @@ Base all responses on evidence and specific points from the reviews."""
 
 def process_reviews_with_debate(content: str, agents: List[Union[ChatOpenAI, Any]], expertises: List[Dict], 
                               custom_prompts: List[str], review_type: str, num_iterations: int, 
-                              progress_callback=None) -> Dict[str, Any]:
+                              rating_scale: str = "Paper Score (-2 to 2)", progress_callback=None) -> Dict[str, Any]:
     all_iterations = []
     latest_reviews = []
-    tabs = st.tabs([f"Iteration {i+1}" for i in range(num_iterations)] + ["Moderator Analysis"])
+    tabs = st.tabs([f"Iteration {i+1}" for i in range(num_iterations)] + ["Final Analysis"])
     
     for iteration in range(num_iterations):
         with tabs[iteration]:
             st.write(f"Starting iteration {iteration + 1}")
             review_results = []
             
-            # Initial reviews
             for i, (agent, expertise, base_prompt) in enumerate(zip(agents[:-1] if len(agents) > len(expertises) else agents, expertises, custom_prompts)):
                 review_container = st.container()
                 with review_container:
@@ -251,7 +250,21 @@ def process_reviews_with_debate(content: str, agents: List[Union[ChatOpenAI, Any
                         processing_msg.empty()
                         with st.expander(f"Review by {expertise['name']} ({expertise['model']})", expanded=True):
                             st.markdown(review_text)
-                            st.caption(f"Critique Style: {expertise['style']}")
+                            col1, col2 = st.columns([1,2])
+                            with col1:
+                                st.caption(f"Critique Style: {expertise['style']}")
+                            with col2:
+                                if "score" in review_text.lower():
+                                    try:
+                                        score_text = review_text.lower().split("score:")[-1].split("\n")[0].strip()
+                                        score = float(next(s for s in score_text.split() if s.replace('.','').isdigit()))
+                                        description = get_score_description(rating_scale, int(score))
+                                        if rating_scale == "Star Rating (1-5)":
+                                            st.write("⭐" * int(score))
+                                        else:
+                                            st.write(f"Score: {score} - {description}")
+                                    except Exception as e:
+                                        logging.warning(f"Could not parse score: {e}")
                             
                     except Exception as e:
                         logging.error(f"Error processing agent {expertise}: {str(e)}")
@@ -263,11 +276,10 @@ def process_reviews_with_debate(content: str, agents: List[Union[ChatOpenAI, Any
                         })
                         processing_msg.error(f"Error processing review from {expertise['name']}")
             
-            # Expert dialogue
             st.subheader("Expert Dialogue")
             for expertise, agent in zip(expertises, agents[:-1] if len(agents) > len(expertises) else agents):
                 try:
-                    dialogue_prompt = generate_debate_summary(review_results, expertise['name'])
+                    dialogue_prompt = generate_debate_summary(review_results, expertise['name'], rating_scale)
                     if expertise['model'] == "GPT-4o":
                         response = agent.invoke([HumanMessage(content=dialogue_prompt)])
                         dialogue = extract_content(response, "[Error in dialogue]")
@@ -286,26 +298,6 @@ def process_reviews_with_debate(content: str, agents: List[Union[ChatOpenAI, Any
             all_iterations.append(review_results)
             latest_reviews = review_results
             st.success(f"Completed iteration {iteration + 1}")
-
-    # Moderator analysis
-    if len(agents) > len(expertises):
-        with tabs[-1]:
-            st.subheader("Moderator Analysis")
-            moderator_agent = agents[-1]
-            
-            try:
-                analysis = generate_moderator_analysis(all_iterations)
-                if isinstance(moderator_agent, ChatOpenAI):
-                    response = moderator_agent.invoke([HumanMessage(content=analysis)])
-                    moderation = extract_content(response, "[Error in moderation]")
-                else:
-                    response = moderator_agent.generate_content(analysis)
-                    moderation = response.text
-                
-                st.markdown(moderation)
-                
-            except Exception as e:
-                st.error(f"Error in moderation: {str(e)}")
 
     return {
         "all_iterations": all_iterations,
