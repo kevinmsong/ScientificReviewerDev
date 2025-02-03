@@ -180,13 +180,20 @@ def scientific_review_page():
     st.header("Scientific Review System")
     st.caption("v2.2.0 - Memoryless AI Mode")
     
-    rating_scale = st.radio(
-        "Rating Scale",
-        ["Paper Score (-2 to 2)", "Star Rating (1-5)", "NIH Scale (1-9)"],
-        help="Paper: -2 (worst) to 2 (best)\nStar: 1-5 stars\nNIH: 1 (best) to 9 (worst)"
-    )
-    st.session_state['rating_scale'] = rating_scale
-    
+    col1, col2 = st.columns([2,1])
+    with col1:
+        try:
+        rating_scale = st.radio(
+            "Rating Scale",
+            ["Paper Score (-2 to 2)", "Star Rating (1-5)", "NIH Scale (1-9)"],
+            help="Paper: -2 (worst) to 2 (best)\nStar: 1-5 stars\nNIH: 1 (best) to 9 (worst)"
+        )
+        st.session_state['rating_scale'] = rating_scale
+    except Exception as e:
+        st.error("Error setting up rating scale")
+        logging.error(f"Rating scale error: {str(e)}")
+        return
+
     review_type = st.selectbox("Select Review Type", ["Paper", "Grant", "Poster"])
     num_reviewers = st.number_input("Number of Reviewers", 1, 10, 2)
     use_moderator = st.checkbox("Include Moderator", value=True) if num_reviewers > 1 else False
