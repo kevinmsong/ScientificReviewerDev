@@ -7,7 +7,7 @@ import fitz
 import io
 from PIL import Image
 import base64
-from typing import List, Dict, Any, Tuple, Union
+from typing import List, Dict, Any, Tuple, Unionfrom typing import List, Dict, Any, Tuple, Union
 import tiktoken
 import google.generativeai as genai
 import re
@@ -96,7 +96,7 @@ def process_review_memoryless(content: str, agents: List[Union[ChatOpenAI, Any]]
 def scientific_review_page():
     st.set_page_config(page_title="Scientific Reviewer", layout="wide")
     st.header("Scientific Review System")
-    st.caption("v2.1.0 - Memoryless AI Mode")
+    st.caption("v2.2.0 - Memoryless AI Mode")
     
     review_type = st.selectbox("Select Review Type", ["Paper", "Grant", "Poster"])
     num_reviewers = st.number_input("Number of Reviewers", 1, 10, 2)
