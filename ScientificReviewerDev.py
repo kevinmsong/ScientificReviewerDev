@@ -11,6 +11,11 @@ from typing import List, Dict, Any, Tuple, Union
 import tiktoken
 import google.generativeai as genai
 import re
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+import io
 
 logging.basicConfig(level=logging.INFO)
 
@@ -137,6 +142,39 @@ def get_default_prompt(review_type: str, expertise: str) -> str:
     }
     return prompts.get(review_type, f"Review this {review_type.lower()}")
 
+def generate_pdf_summary(all_reviews: List[List[Dict]], scores: List[float]) -> bytes:
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter)
+    styles = getSampleStyleSheet()
+    story = []
+    
+    # Title
+    story.append(Paragraph("Scientific Review Summary", styles['Title']))
+    story.append(Spacer(1, 12))
+    
+    # Score Summary
+    if scores:
+        avg_score = sum(scores) / len(scores)
+        story.append(Paragraph(f"Overall Score: {avg_score:.2f}", styles['Heading1']))
+        description = get_score_description(st.session_state.get('rating_scale', 'Paper Score (-2 to 2)'), avg_score)
+        story.append(Paragraph(f"Assessment: {description}", styles['Normal']))
+        story.append(Spacer(1, 12))
+    
+    # Reviews
+    for iteration_idx, iteration in enumerate(all_reviews, 1):
+        story.append(Paragraph(f"Iteration {iteration_idx}", styles['Heading1']))
+        for review in iteration:
+            if review["success"]:
+                story.append(Paragraph(f"Review by {review['expertise']['name']}", styles['Heading2']))
+                story.append(Paragraph(f"Model: {review['expertise']['model']}", styles['Normal']))
+                story.append(Paragraph(f"Style: {review['expertise']['style']}", styles['Normal']))
+                story.append(Paragraph(review['review'], styles['Normal']))
+                story.append(Spacer(1, 12))
+    
+    doc.build(story)
+    buffer.seek(0)
+    return buffer.getvalue()
+
 def generate_review_summary(all_reviews: List[List[Dict]], scores: List[float]) -> str:
     summary = "# Scientific Review Summary\n\n"
     
@@ -165,7 +203,7 @@ def process_review_memoryless(content: str, agents: List[Union[ChatOpenAI, Any]]
     
     progress_bar = st.progress(0)
     status_text = st.empty()
-    tabs = st.tabs([f"Iteration {i+1}" for i in range(num_iterations)])
+    tabs = st.tabs([f"Iteration {i+1}" for i in range(num_iterations)] + ["Moderator Summary"])
     
     total_steps = num_iterations * len(agents)
     current_step = 0
@@ -219,12 +257,34 @@ def process_review_memoryless(content: str, agents: List[Union[ChatOpenAI, Any]]
     
     if review_results:
         summary_md = generate_review_summary(all_reviews, scores)
-        st.download_button(
-            label="Download Review Summary",
-            data=summary_md,
-            file_name="review_summary.md",
-            mime="text/markdown",
-        )
+        
+        # Add moderator summary tab
+        with tabs[-1]:
+            st.subheader("Review Summary")
+            if scores:
+                avg_score = sum(scores) / len(scores)
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Average Score", f"{avg_score:.2f}")
+                with col2:
+                    st.write("Assessment:", get_score_description(st.session_state.get('rating_scale', 'Paper Score (-2 to 2)'), avg_score))
+            
+            # Show iteration summaries
+            for i, iteration in enumerate(all_reviews, 1):
+                with st.expander(f"Iteration {i} Summary", expanded=True):
+                    for review in iteration:
+                        if review["success"]:
+                            st.markdown(f"**Review by {review['expertise']['name']}**")
+                            st.markdown(review['review'])
+            
+            # Download button
+            pdf_bytes = generate_pdf_summary(all_reviews, scores)
+            st.download_button(
+                label="Download Complete Review Summary (PDF)",
+                data=pdf_bytes,
+                file_name="review_summary.pdf",
+                mime="application/pdf",
+            )
     
     return {"reviews": review_results, "success": True}
 
