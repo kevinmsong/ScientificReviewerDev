@@ -12,7 +12,7 @@ import tiktoken
 import google.generativeai as genai
 import re
 from reportlab.lib import colors
-from reportlab.lib.pagesizes import letterfrom reportlab.lib.pagesizes import letter
+from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 import io
