@@ -237,8 +237,13 @@ def scientific_review_page():
             return
 
     review_type = st.selectbox("Select Review Type", ["Paper", "Grant", "Poster"])
-    num_reviewers = st.number_input("Number of Reviewers", 1, 10, 2)
-    num_iterations = st.number_input("Discussion Iterations", 1, 5, 2)
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        num_reviewers = st.number_input("Number of Reviewers", 1, 10, 2)
+    with col2:
+        num_iterations = st.number_input("Number of Discussion Iterations", 1, 5, 1)
+        
     use_moderator = st.checkbox("Include Moderator", value=True) if num_reviewers > 1 else False
     
     expertises = []
