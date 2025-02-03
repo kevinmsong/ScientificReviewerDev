@@ -390,7 +390,7 @@ def generate_pdf_summary(all_reviews: List[List[Dict]], scores: List[float], mod
 
 def scientific_review_page():
     st.set_page_config(page_title="Scientific Reviewer", layout="wide")
-    st.header("Scientific Review System")import fitz
+    st.header("Scientific Review System")
     st.caption("v2.2.0 - Memoryless AI Mode")
     
     col1, col2 = st.columns([2,1])
