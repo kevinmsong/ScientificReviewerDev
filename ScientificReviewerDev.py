@@ -7,7 +7,7 @@ import fitz
 import io
 from PIL import Image
 import base64
-from typing import List, Dict, Any, Tuple, Unionfrom typing import List, Dict, Any, Tuple, Union
+from typing import List, Dict, Any, Tuple, Union
 import tiktoken
 import google.generativeai as genai
 import re
