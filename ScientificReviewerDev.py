@@ -372,7 +372,14 @@ def scientific_review_page():
     if uploaded_file and st.button("Start Review"):
         content, _ = extract_pdf_content(uploaded_file)
         agents = create_memoryless_agents(expertises, use_moderator)
-        process_review_memoryless(content, agents, expertises, custom_prompts, num_iterations, use_moderator)
+        process_review_memoryless(
+            content=content,
+            agents=agents,
+            expertises=expertises,
+            custom_prompts=custom_prompts,
+            num_iterations=num_iterations,
+            use_moderator=use_moderator
+        )
 
 if __name__ == "__main__":
     scientific_review_page()
