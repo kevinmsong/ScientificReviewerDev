@@ -43,9 +43,14 @@ def get_score_description(rating_scale: str, score: float) -> str:
 
 def create_memoryless_agents(expertises: List[Dict], include_moderator: bool = False) -> List[Union[ChatOpenAI, Any]]:
     agents = []
+    
+    # Adjust temperature based on critique style
     for expertise in expertises:
         if expertise["model"] == "GPT-4o":
-            agent = ChatOpenAI(temperature=0.1, openai_api_key=st.secrets["openai_api_key"], model="gpt-4o")
+            # Increase temperature slightly for more lenient styles
+            temp = 0.1 + (expertise.get("style", 0) * 0.1)
+            temp = max(0.1, min(0.7, temp))  # Keep temperature in reasonable bounds
+            agent = ChatOpenAI(temperature=temp, openai_api_key=st.secrets["openai_api_key"], model="gpt-4o")
         else:
             genai.configure(api_key=st.secrets["gemini_api_key"])
             agent = genai.GenerativeModel("gemini-2.0-flash-exp")
@@ -59,11 +64,11 @@ def create_memoryless_agents(expertises: List[Dict], include_moderator: bool = F
 
 def adjust_prompt_style(prompt: str, style: int, rating_scale: str) -> str:
     styles = {
-        -2: "Be extremely thorough and critical. Focus on weaknesses and flaws.",
-        -1: "Maintain high standards. Carefully identify both strengths and weaknesses.",
-        0: "Provide balanced review of strengths and weaknesses.",
-        1: "Emphasize positive aspects while noting necessary improvements.",
-        2: "Take an encouraging approach while noting critical issues."
+        -2: "Be extremely thorough and critical. Focus primarily on identifying weaknesses, flaws, and areas needing major improvement. Be direct and emphasize problems that must be addressed.",
+        -1: "Maintain high academic standards. Carefully identify both strengths and weaknesses, with particular attention to methodological and technical issues. Be constructively critical.",
+        0: "Provide a balanced evaluation of strengths and weaknesses. Give equal attention to positive aspects and areas for improvement.",
+        1: "Focus primarily on strengths while noting necessary improvements. Frame critiques constructively and emphasize potential.",
+        2: "Take an encouraging and supportive approach. Highlight strengths and frame weaknesses as opportunities for enhancement. Maintain scientific rigor while being constructive."
     }
     
     scales = {
@@ -72,7 +77,10 @@ def adjust_prompt_style(prompt: str, style: int, rating_scale: str) -> str:
         "NIH Scale (1-9)": "Score from 1 (exceptional) to 9 (poor)"
     }
     
-    return f"{prompt}\n\nReview Style: {styles[style]}\n\nRating: {scales[rating_scale]}"
+    style_header = f"\n\nReview Style Guidelines:\n{styles[style]}"
+    rating_header = f"\nRating Scale: {scales[rating_scale]}"
+    
+    return f"{prompt}{style_header}{rating_header}"
 
 def process_chunk_memoryless(chunk: str, agent: Union[ChatOpenAI, Any], expertise: str, prompt: str, model_type: str) -> str:
     chunk_prompt = f"""Reviewing content:
