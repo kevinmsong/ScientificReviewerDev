@@ -277,6 +277,33 @@ def process_review_memoryless(content: str, agents: List[Union[ChatOpenAI, Any]]
                             st.markdown(f"**Review by {review['expertise']['name']}**")
                             st.markdown(review['review'])
             
+            # Moderator analysis
+            if use_moderator and len(agents) > len(expertises):
+                st.subheader("Moderator Analysis")
+                try:
+                    moderator_agent = agents[-1]
+                    moderator_prompt = f"""As a scientific moderator, analyze the reviews and provide a comprehensive analysis:
+
+Reviews across {num_iterations} iterations:
+{generate_moderator_prompt(all_reviews)}
+
+Please provide:
+1. Discussion Evolution
+2. Review Quality Assessment
+3. Key Points Synthesis
+4. Final Recommendation with Score Justification"""
+
+                    if expertises[0]['model'] == "GPT-4o":
+                        moderator_response = moderator_agent.invoke([HumanMessage(content=moderator_prompt)])
+                        moderator_analysis = moderator_response.content
+                    else:
+                        moderator_response = moderator_agent.generate_content(moderator_prompt)
+                        moderator_analysis = moderator_response.text
+
+                    st.markdown(moderator_analysis)
+                except Exception as e:
+                    st.error(f"Error in moderator analysis: {str(e)}")
+
             # Download button
             pdf_bytes = generate_pdf_summary(all_reviews, scores)
             st.download_button(
@@ -345,7 +372,7 @@ def scientific_review_page():
     if uploaded_file and st.button("Start Review"):
         content, _ = extract_pdf_content(uploaded_file)
         agents = create_memoryless_agents(expertises, use_moderator)
-        process_review_memoryless(content, agents, expertises, custom_prompts, num_iterations)
+        process_review_memoryless(content, agents, expertises, custom_prompts, num_iterations, use_moderator)
 
 if __name__ == "__main__":
     scientific_review_page()
