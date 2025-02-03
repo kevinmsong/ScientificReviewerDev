@@ -142,53 +142,98 @@ def get_default_prompt(review_type: str, expertise: str) -> str:
     }
     return prompts.get(review_type, f"Review this {review_type.lower()}")
 
-def process_review_memoryless(content: str, agents: List[Union[ChatOpenAI, Any]], expertises: List[Dict], 
-                            custom_prompts: List[str], *, num_iterations: int = 1) -> Dict[str, Any]:
+def process_review_memoryless(content: str, agents: List[Union[ChatOpenAI, Any]], expertises: List[Dict],
+                         custom_prompts: List[str], *, num_iterations: int = 1) -> Dict[str, Any]:
     review_results = []
     scores = []
     all_reviews = []
+    previous_iteration = []
     
+    progress_bar = st.progress(0)
+    status_text = st.empty()
     tabs = st.tabs([f"Iteration {i+1}" for i in range(num_iterations)] + ["Moderator Analysis"])
+    
+    total_steps = num_iterations * len(agents) * 2  # Double for reviews + dialogues
+    current_step = 0
     
     for iteration in range(num_iterations):
         iteration_reviews = []
         with tabs[iteration]:
             st.write(f"Starting iteration {iteration + 1}")
-            for i, (agent, expertise, prompt) in enumerate(zip(agents[:-1] if len(agents) > len(expertises) else agents, expertises, custom_prompts)):
-                st.write(f"Processing review from {expertise['name']}...")
+            
+            # Reviews phase
+            for i, (agent, expertise, base_prompt) in enumerate(zip(agents[:-1] if len(agents) > len(expertises) else agents, expertises, custom_prompts)):
+                status_text.text(f"Processing review from {expertise['name']} (Iteration {iteration + 1})")
+                current_step += 1
+                progress_bar.progress(current_step / total_steps)
+                
                 try:
-                    review_text = process_chunk_memoryless(content, agent, expertise['name'], prompt, expertise['model'])
+                    if iteration > 0:
+                        prompt = get_iteration_prompt(expertise['name'], iteration + 1, previous_iteration, "paper", st.session_state['rating_scale'])
+                        review_text = process_chunk_memoryless(content, agent, expertise['name'], f"{base_prompt}\n\n{prompt}", expertise['model'])
+                    else:
+                        review_text = process_chunk_memoryless(content, agent, expertise['name'], base_prompt, expertise['model'])
+                    
                     review_data = {
                         "expertise": expertise,
                         "review": review_text,
                         "success": True,
                         "iteration": iteration + 1
                     }
-                    review_results.append(review_data)
                     iteration_reviews.append(review_data)
                     
-                    score_matches = re.findall(r'score[:\s]*(-?\d+\.?\d*)', review_text.lower())
-                    if score_matches:
-                        try:
-                            scores.append(float(score_matches[0]))
-                        except ValueError:
-                            pass
-                            
-                    with st.expander(f"Review by {expertise['name']} ({expertise['model']})", expanded=True):
+                    with st.expander(f"Review by {expertise['name']}", expanded=True):
                         st.markdown(review_text)
-                        col1, col2 = st.columns([1,2])
-                        with col1:
-                            st.caption(f"Critique Style: {expertise['style']}")
+                        st.caption(f"Critique Style: {expertise['style']}")
+                
                 except Exception as e:
-                    logging.error(f"Error processing agent {expertise['name']}: {str(e)}")
-                    review_results.append({
+                    st.error(f"Error processing review: {str(e)}")
+                    iteration_reviews.append({
                         "expertise": expertise,
                         "review": f"Error: {str(e)}",
                         "success": False,
                         "iteration": iteration + 1
                     })
-        
-        all_reviews.append(iteration_reviews)
+            
+            # Expert dialogue phase
+            st.subheader("Expert Dialogue")
+            for i, review in enumerate(iteration_reviews):
+                if review["success"]:
+                    status_text.text(f"Processing dialogue for {review['expertise']['name']} (Iteration {iteration + 1})")
+                    current_step += 1
+                    progress_bar.progress(current_step / total_steps)
+                    
+                    dialogue_prompt = get_expert_dialogue_prompt(iteration_reviews, review['expertise']['name'], st.session_state['rating_scale'])
+                    try:
+                        if review['expertise']['model'] == "GPT-4o":
+                            agent = agents[i]
+                            response = agent.invoke([HumanMessage(content=dialogue_prompt)])
+                            dialogue = response.content
+                        else:
+                            agent = agents[i]
+                            response = agent.generate_content(dialogue_prompt)
+                            dialogue = response.text
+                        
+                        review['dialogue'] = dialogue
+                        with st.expander(f"Response from {review['expertise']['name']}", expanded=True):
+                            st.markdown(dialogue)
+                            
+                    except Exception as e:
+                        st.error(f"Error in expert dialogue: {str(e)}")
+            
+            all_reviews.append(iteration_reviews)
+            previous_iteration = iteration_reviews.copy()
+
+            # Extract scores from both reviews and dialogues
+            for review in iteration_reviews:
+                if review["success"]:
+                    score_matches = re.findall(r'score[:\s]*(-?\d+\.?\d*)', review['review'].lower())
+                    score_matches.extend(re.findall(r'score[:\s]*(-?\d+\.?\d*)', review.get('dialogue', '').lower()))
+                    if score_matches:
+                        try:
+                            scores.append(float(score_matches[-1]))  # Use most recent score
+                        except ValueError:
+                            pass
 
     # Moderator Analysis
     with tabs[-1]:
@@ -205,33 +250,41 @@ def process_review_memoryless(content: str, agents: List[Union[ChatOpenAI, Any]]
             st.subheader("Moderator Analysis")
             try:
                 moderator_agent = agents[-1]
-                moderator_prompt = f"""As a scientific moderator, analyze these reviews and provide a comprehensive analysis:
+                all_dialogue = []
+                for iteration in all_reviews:
+                    for review in iteration:
+                        if review["success"]:
+                            all_dialogue.append(f"{review['expertise']['name']} Review:\n{review['review']}")
+                            if review.get('dialogue'):
+                                all_dialogue.append(f"Dialogue:\n{review['dialogue']}")
+                
+                moderator_prompt = f"""As a scientific moderator, analyze the complete review discussion:
 
-Reviews:
-{' '.join([r['review'] for r in review_results if r['success']])}
+{' '.join(all_dialogue)}
 
 Please provide:
-1. Review Quality Assessment
-2. Key Points Synthesis
-3. Final Recommendation"""
+1. Evolution of Discussion
+2. Review Quality Assessment
+3. Key Points Synthesis
+4. Overall Recommendation
+5. Final Score Assessment"""
 
-                if expertises[0]['model'] == "GPT-4o":
-                    moderator_response = moderator_agent.invoke([HumanMessage(content=moderator_prompt)])
-                    moderator_analysis = moderator_response.content
-                else:
-                    moderator_response = moderator_agent.generate_content(moderator_prompt)
-                    moderator_analysis = moderator_response.text
-                
+                moderator_response = moderator_agent.invoke([HumanMessage(content=moderator_prompt)])
+                moderator_analysis = moderator_response.content
                 st.markdown(moderator_analysis)
             except Exception as e:
                 st.error(f"Error in moderator analysis: {str(e)}")
 
+        # Iteration summaries
         for i, iteration in enumerate(all_reviews, 1):
             with st.expander(f"Iteration {i} Summary", expanded=True):
                 for review in iteration:
                     if review["success"]:
                         st.markdown(f"**Review by {review['expertise']['name']}**")
                         st.markdown(review['review'])
+                        if review.get('dialogue'):
+                            st.markdown("**Dialogue Response:**")
+                            st.markdown(review['dialogue'])
 
         # Export options
         pdf_bytes = generate_pdf_summary(all_reviews, scores)
@@ -242,19 +295,65 @@ Please provide:
             mime="application/pdf",
         )
 
+    status_text.empty()
+    progress_bar.empty()
     return {"reviews": review_results, "success": True}
+
+def get_expert_dialogue_prompt(reviews: List[Dict], expertise: str, rating_scale: str) -> str:
+    return f"""As {expertise}, analyze and respond to the other reviews:
+
+Previous reviews:
+{' '.join([r['review'] for r in reviews if r['success'] and r['expertise']['name'] != expertise])}
+
+Please:
+1. Address other reviewers' critiques
+2. Defend or revise your assessments
+3. Highlight areas of agreement/disagreement
+4. Provide evidence for your positions
+5. Update your score using the {rating_scale} scale if needed"""
+
+def get_iteration_prompt(expertise: str, iteration: int, previous_reviews: List[Dict], topic: str, rating_scale: str) -> str:
+    prompt = f"""As an expert in {expertise}, this is iteration {iteration} of the review.
+
+Previous discussion history:
+"""
+    for rev in previous_reviews:
+        if rev.get("dialogue"):
+            prompt += f"\n{rev['expertise']['name']} Review:\n{rev['review']}\n"
+            prompt += f"Dialogue:\n{rev['dialogue']}\n"
+        else:
+            prompt += f"\n{rev['expertise']['name']} Review:\n{rev['review']}\n"
+
+    prompt += f"""
+Please provide your {'updated' if iteration > 1 else 'initial'} review considering the above discussion:
+1. Overview and Analysis
+2. Response to Previous Reviews
+3. Methodology Assessment
+4. Key Points of Agreement/Disagreement
+5. Recommendations
+6. Score using {rating_scale}"""
+
+    return prompt
 
 def generate_pdf_summary(all_reviews: List[List[Dict]], scores: List[float]) -> bytes:
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter)
     styles = getSampleStyleSheet()
-    story = []
     
-    # Title
+    # Add custom style for dialogue
+    dialogue_style = ParagraphStyle(
+        name='Dialogue',
+        parent=styles['Normal'],
+        leftIndent=20,
+        textColor=colors.blue,
+        spaceAfter=12
+    )
+    styles.add(dialogue_style)
+    
+    story = []
     story.append(Paragraph("Scientific Review Summary", styles['Title']))
     story.append(Spacer(1, 12))
     
-    # Score Summary
     if scores:
         avg_score = sum(scores) / len(scores)
         story.append(Paragraph(f"Overall Score: {avg_score:.2f}", styles['Heading1']))
@@ -262,7 +361,6 @@ def generate_pdf_summary(all_reviews: List[List[Dict]], scores: List[float]) -> 
         story.append(Paragraph(f"Assessment: {description}", styles['Normal']))
         story.append(Spacer(1, 12))
     
-    # Reviews
     for iteration_idx, iteration in enumerate(all_reviews, 1):
         story.append(Paragraph(f"Iteration {iteration_idx}", styles['Heading1']))
         for review in iteration:
@@ -271,6 +369,9 @@ def generate_pdf_summary(all_reviews: List[List[Dict]], scores: List[float]) -> 
                 story.append(Paragraph(f"Model: {review['expertise']['model']}", styles['Normal']))
                 story.append(Paragraph(f"Style: {review['expertise']['style']}", styles['Normal']))
                 story.append(Paragraph(review['review'], styles['Normal']))
+                if review.get('dialogue'):
+                    story.append(Paragraph("Expert Dialogue Response:", styles['Heading3']))
+                    story.append(Paragraph(review['dialogue'], dialogue_style))
                 story.append(Spacer(1, 12))
     
     doc.build(story)
