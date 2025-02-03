@@ -58,6 +58,8 @@ def create_memoryless_agents(expertises: List[Dict], include_moderator: bool = F
         agents.append(agent)
     
     if include_moderator and len(expertises) > 1:
+        # Force moderator to use GPT-4o
+        expertises.append({"model": "GPT-4o", "name": "Moderator"})
         moderator_agent = ChatOpenAI(temperature=0.1, openai_api_key=st.secrets["openai_api_key"], model="gpt-4o")
         agents.append(moderator_agent)
     
