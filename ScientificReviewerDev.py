@@ -247,6 +247,7 @@ def process_review_memoryless(content: str, agents: List[Union[ChatOpenAI, Any]]
             with col2:
                 st.write("Assessment:", get_score_description(st.session_state.get('rating_scale', 'Paper Score (-2 to 2)'), avg_score))
         
+        moderator_analysis = None
         # Moderator Analysis (if enabled)
         if len(agents) > len(expertises):
             st.subheader("Moderator Analysis")
@@ -273,7 +274,8 @@ Please provide:
 5. Final Recommendation with Score Assessment"""
 
                 moderator_response = moderator_agent.invoke([HumanMessage(content=moderator_prompt)])
-                st.markdown(moderator_response.content)
+                moderator_analysis = moderator_response.content
+                st.markdown(moderator_analysis)
             except Exception as e:
                 st.error(f"Error in moderator analysis: {str(e)}")
         
@@ -290,7 +292,7 @@ Please provide:
                             st.markdown(review['dialogue'])
 
         # Export options
-        pdf_bytes = generate_pdf_summary(all_reviews, scores)
+        pdf_bytes = generate_pdf_summary(all_reviews, scores, moderator_analysis)
         st.download_button(
             label="Download Complete Review Summary (PDF)",
             data=pdf_bytes,
@@ -301,6 +303,7 @@ Please provide:
     status_text.empty()
     progress_bar.empty()
     return {"reviews": review_results, "success": True}
+
 def get_expert_dialogue_prompt(reviews: List[Dict], expertise: str, rating_scale: str) -> str:
     return f"""As {expertise}, analyze and respond to the other reviews:
 
@@ -308,14 +311,14 @@ Previous reviews:
 {' '.join([r['review'] for r in reviews if r['success'] and r['expertise']['name'] != expertise])}
 
 Please:
-1. Address other reviewers' critiques
-2. Defend or revise your assessments
-3. Highlight areas of agreement/disagreement
-4. Provide evidence for your positions
-5. Update your score using the {rating_scale} scale if needed"""
+1. Address other reviewers' critiques and points
+2. Defend your position with evidence or revise based on valid criticism
+3. Highlight areas of agreement and disagreement
+4. Propose consensus where possible
+5. Update your score using the {rating_scale} scale if your view has changed based on the discussion"""
 
 def get_iteration_prompt(expertise: str, iteration: int, previous_reviews: List[Dict], topic: str, rating_scale: str) -> str:
-    prompt = f"""As an expert in {expertise}, this is iteration {iteration} of the review.
+    prompt = f"""As an expert in {expertise}, participating in iteration {iteration} of the review:
 
 Previous discussion history:
 """
@@ -327,22 +330,22 @@ Previous discussion history:
             prompt += f"\n{rev['expertise']['name']} Review:\n{rev['review']}\n"
 
     prompt += f"""
-Please provide your {'updated' if iteration > 1 else 'initial'} review considering the above discussion:
-1. Overview and Analysis
-2. Response to Previous Reviews
-3. Methodology Assessment
-4. Key Points of Agreement/Disagreement
-5. Recommendations
-6. Score using {rating_scale}"""
+Please provide your updated review considering all prior discussion:
+1. Response to Points Raised
+2. Technical Analysis
+3. Areas of Agreement/Disagreement
+4. Updated Evidence and Arguments
+5. Revised Recommendations
+6. Updated Score using {rating_scale}
+7. Key Discussion Points"""
 
     return prompt
 
-def generate_pdf_summary(all_reviews: List[List[Dict]], scores: List[float]) -> bytes:
+def generate_pdf_summary(all_reviews: List[List[Dict]], scores: List[float], moderator_analysis: str = None) -> bytes:
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter)
     styles = getSampleStyleSheet()
     
-    # Add custom style for dialogue
     dialogue_style = ParagraphStyle(
         name='Dialogue',
         parent=styles['Normal'],
@@ -376,40 +379,10 @@ def generate_pdf_summary(all_reviews: List[List[Dict]], scores: List[float]) -> 
                     story.append(Paragraph(review['dialogue'], dialogue_style))
                 story.append(Spacer(1, 12))
     
-    # Generate and include moderator analysis in PDF
-    moderator_analysis = ""
-    if len(agents) > len(expertises):
-        try:
-            moderator_agent = agents[-1]
-            all_dialogue = []
-            for iteration in all_reviews:
-                for review in iteration:
-                    if review["success"]:
-                        all_dialogue.append(f"{review['expertise']['name']} Review:\n{review['review']}")
-                        if review.get('dialogue'):
-                            all_dialogue.append(f"Dialogue:\n{review['dialogue']}")
-            
-            moderator_prompt = f"""As a scientific moderator, analyze the complete review discussion:
-
-{' '.join(all_dialogue)}
-
-Please provide:
-1. Evolution of Discussion
-2. Review Quality Assessment
-3. Key Points Synthesis
-4. Overall Recommendation
-5. Final Score Assessment"""
-
-            moderator_response = moderator_agent.invoke([HumanMessage(content=moderator_prompt)])
-            moderator_analysis = moderator_response.content
-            
-            # Add moderator analysis to PDF
-            story.append(Paragraph("Moderator Analysis", styles['Heading1']))
-            story.append(Paragraph(moderator_analysis, styles['Normal']))
-            story.append(Spacer(1, 12))
-            
-        except Exception as e:
-            story.append(Paragraph(f"Error in moderator analysis: {str(e)}", styles['Normal']))
+    if moderator_analysis:
+        story.append(Paragraph("Moderator Analysis", styles['Heading1']))
+        story.append(Paragraph(moderator_analysis, styles['Normal']))
+        story.append(Spacer(1, 12))
     
     doc.build(story)
     buffer.seek(0)
@@ -417,7 +390,7 @@ Please provide:
 
 def scientific_review_page():
     st.set_page_config(page_title="Scientific Reviewer", layout="wide")
-    st.header("Scientific Review System")
+    st.header("Scientific Review System")import fitz
     st.caption("v2.2.0 - Memoryless AI Mode")
     
     col1, col2 = st.columns([2,1])
