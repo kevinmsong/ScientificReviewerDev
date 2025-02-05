@@ -1,10 +1,21 @@
+# Web app framework
 streamlit
+
+# OpenAI API and related language model integration
 openai
-langchain-openai
-langchain-core
+langchain
+
+# PDF processing
 PyMuPDF
+
+# Image processing
 Pillow
+
+# Tokenization
 tiktoken
+
+# Google's Generative AI client library
 google-generativeai
-python-dotenv
+
+# PDF report generation
 reportlab
