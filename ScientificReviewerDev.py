@@ -1,8 +1,10 @@
 import streamlit as st
 import logging
 from openai import OpenAI
-from langchain.chat_models import ChatOpenAI
-from langchain.schema import HumanMessage
+# Updated import for ChatOpenAI:
+from langchain.chat_models import ChatOpenAI  
+# Updated import for HumanMessage:
+from langchain.schema import HumanMessage  
 import fitz
 import io
 from PIL import Image
