@@ -1,6 +1,6 @@
 import streamlit as st
 import logging
-from openai import OpenAI
+from openai import OpenAIfrom OPENAI Import OpenAI
 # Updated import for ChatOpenAI:
 from langchain.chat_models import ChatOpenAI  
 # Updated import for HumanMessage:
