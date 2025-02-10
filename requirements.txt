@@ -4,6 +4,7 @@ streamlit
 # OpenAI API and related language model integration
 openai
 langchain
+langchain-community
 
 # PDF processing
 PyMuPDF
