@@ -182,20 +182,53 @@ def adjust_prompt_style(prompt: str, style: int, rating_scale: str) -> str:
 
 def process_chunk_memoryless(chunk: str, agent: Union[ChatOpenAI, Any], expertise: str, prompt: str, model_type: str) -> str:
     logging.info(f"Processing chunk for {expertise}")
-    logging.info(f"Chunk preview: {chunk[:200]}...")
     
-    full_prompt = prompt + "\n\nDocument Content:\n" + chunk
+    # Set model-specific token limits
+    max_tokens = {
+        "GPT-4o": 14000,
+        "o3-mini": 12000,  # Reduced from default to leave room for response
+        "Gemini 2.0 Flash": 14000
+    }
     
-    try:
-        if model_type in ["GPT-4o", "o3-mini"]:
-            response = agent.invoke([HumanMessage(content=full_prompt)])
-            return response.content
-        else:
-            response = agent.generate_content(full_prompt)
-            return response.text
-    except Exception as e:
-        logging.error(f"Error processing chunk for {expertise}: {str(e)}")
-        return f"[Error: {str(e)}]"
+    # Calculate available tokens for content
+    prompt_tokens = count_tokens(prompt)
+    max_content_tokens = max_tokens.get(model_type, 12000) - prompt_tokens - 2000  # Reserve 2000 for response
+    
+    # Chunk content if needed
+    chunks = chunk_content(chunk, max_content_tokens)
+    responses = []
+    
+    for i, content_chunk in enumerate(chunks):
+        try:
+            chunk_prompt = f"""[Part {i+1}/{len(chunks)}]
+{prompt}
+
+Document Content:
+{content_chunk}
+
+Note: This is part {i+1} of {len(chunks)} of the document. Please focus on analyzing this section while maintaining awareness of the overall review context."""
+
+            if model_type in ["GPT-4o", "o3-mini"]:
+                response = agent.invoke([HumanMessage(content=chunk_prompt)])
+                responses.append(response.content)
+            else:
+                response = agent.generate_content(chunk_prompt)
+                responses.append(response.text)
+                
+            logging.info(f"Successfully processed chunk {i+1}/{len(chunks)} for {expertise}")
+            
+        except Exception as e:
+            error_msg = f"Error processing chunk {i+1} for {expertise}: {str(e)}"
+            logging.error(error_msg)
+            responses.append(f"[Error in part {i+1}: {str(e)}]")
+    
+    # Combine responses with clear section markers
+    combined_response = "\n\n---\n\n".join([
+        f"[Part {i+1}/{len(chunks)}]\n{response}" 
+        for i, response in enumerate(responses)
+    ])
+    
+    return combined_response
 
 def extract_pdf_content(pdf_file) -> Tuple[str, List[Image.Image]]:
     logging.info("Starting PDF extraction")
