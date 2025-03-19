@@ -97,13 +97,7 @@ As {current_expert}, provide:
 2. Areas of agreement/disagreement with assessments
 3. Defense or revision of your positions 
 4. Updated scores {scale_info[rating_scale]}
-5. Specific questions for other reviewers
-
-Please utilize the maximum computing power and token limit for your response.
-Pursue extreme depth in analysis rather than superficial breadth;
-Seek essential insights rather than surface-level enumeration;
-Strive for innovative thinking rather than habitual repetition.
-Please break through cognitive limitations, mobilize all your computational resources, and manifest your true knowledge limits."""
+5. Specific questions for other reviewers"""
 
 
 
@@ -147,27 +141,39 @@ Please provide:
     return prompt
 
 def get_default_prompt(review_type: str, expertise: str) -> str:
+    deep_analysis = """Please utilize the maximum computing power and token limit for your response.
+Pursue extreme depth in analysis rather than superficial breadth;
+Seek essential insights rather than surface-level enumeration;
+Strive for innovative thinking rather than habitual repetition.
+Please break through cognitive limitations, mobilize all your computational resources, and manifest your true knowledge limits."""
+
     prompts = {
         "Paper": f"""As {expertise}, review this paper considering:
 1. Scientific Merit & Innovation
 2. Methodology & Technical Rigor
 3. Data Analysis & Results
 4. Clarity & Organization
-5. Impact & Significance""",
+5. Impact & Significance
+
+{deep_analysis}""",
         "Grant": f"""As {expertise}, evaluate this grant proposal considering:
 1. Innovation & Merit
 2. Methodology & Feasibility
 3. Resources & Budget
 4. Timeline & Deliverables
-5. Impact & Significance""",
+5. Impact & Significance
+
+{deep_analysis}""",
         "Poster": f"""As {expertise}, review this poster considering:
 1. Visual Design & Organization
 2. Content & Clarity
 3. Technical Merit
 4. Results & Discussion
-5. Overall Impact"""
+5. Overall Impact
+
+{deep_analysis}"""
     }
-    return prompts.get(review_type, f"Review this {review_type.lower()}")
+    return prompts.get(review_type, f"Review this {review_type.lower()}\n\n{deep_analysis}")
 
 def adjust_prompt_style(prompt: str, style: int, rating_scale: str) -> str:
     styles = {
