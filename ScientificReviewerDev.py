@@ -183,17 +183,29 @@ def adjust_prompt_style(prompt: str, style: int, rating_scale: str) -> str:
 def process_chunk_memoryless(chunk: str, agent: Union[ChatOpenAI, Any], expertise: str, prompt: str, model_type: str) -> str:
     logging.info(f"Processing chunk for {expertise}")
     logging.info(f"Chunk preview: {chunk[:200]}...")
-    
-    try:
-        if model_type in ["GPT-4o", "o3-mini"]:
+    # Calculate available tokens for content
+    try:pt_tokens = count_tokens(prompt)
+        if model_type in ["GPT-4o", "o3-mini"]: # Leave room for response
             response = agent.invoke([HumanMessage(content=prompt + "\n\nDocument Content:\n" + chunk)])
             return response.content
-        else:
+        else:chunk_content(chunk, max_content_tokens)
             response = agent.generate_content(prompt + "\n\nDocument Content:\n" + chunk)
             return response.text
-    except Exception as e:
+    except Exception as e:n enumerate(chunks):
         logging.error(f"Error processing chunk for {expertise}: {str(e)}")
-        return f"[Error: {str(e)}]"
+        return f"[Error: {str(e)}]"4o", "o3-mini"]:
+                full_prompt = prompt + "\n\nDocument Content (Part " + str(i+1) + "/" + str(len(chunks)) + "):\n" + content_chunk
+                response = agent.invoke([HumanMessage(content=full_prompt)])
+                responses.append(response.content)
+            else:
+                full_prompt = prompt + "\n\nDocument Content (Part " + str(i+1) + "/" + str(len(chunks)) + "):\n" + content_chunk
+                response = agent.generate_content(full_prompt)
+                responses.append(response.text)
+        except Exception as e:
+            logging.error(f"Error processing chunk {i+1} for {expertise}: {str(e)}")
+            responses.append(f"[Error in part {i+1}: {str(e)}]")
+    
+    return "\n\n---\n\n".join(responses)
 
 def extract_pdf_content(pdf_file) -> Tuple[str, List[Image.Image]]:
     logging.info("Starting PDF extraction")
@@ -640,5 +652,49 @@ REQUIREMENTS:
         logging.error(f"Error in dialogue: {str(e)}")
         return f"[Error in dialogue: {str(e)}]"
     
+def count_tokens(text: str, model: str = "gpt-3.5-turbo") -> int:
+    encoding = tiktoken.encoding_for_model(model)
+    return len(encoding.encode(text))
+
+def chunk_content(text: str, max_tokens: int = 14000, model: str = "gpt-3.5-turbo") -> List[str]:
+    chunks = []
+    current_chunk = ""
+    current_tokens = 0
+    
+    # Split into paragraphs
+    paragraphs = text.split('\n\n')
+    
+    for paragraph in paragraphs:
+        paragraph_tokens = count_tokens(paragraph, model)
+        
+        # If single paragraph exceeds limit, split it
+        if paragraph_tokens > max_tokens:
+            words = paragraph.split()
+            temp_chunk = ""
+            for word in words:
+
+
+
+
+
+
+
+
+
+
+
+
+
+```             current_chunk += "\n\n" + paragraph if current_chunk else paragraph        if current_tokens + paragraph_tokens < max_tokens:        # Check if adding paragraph exceeds limit                        continue                chunks.append(temp_chunk.strip())            if temp_chunk:                    temp_chunk = word                    chunks.append(temp_chunk.strip())                else:                    temp_chunk += " " + word                if count_tokens(temp_chunk + " " + word, model) < max_tokens:            current_tokens += paragraph_tokens
+        else:
+            chunks.append(current_chunk)
+            current_chunk = paragraph
+            current_tokens = paragraph_tokens
+    
+    if current_chunk:
+        chunks.append(current_chunk)
+    
+    return chunks
+
 if __name__ == "__main__":
     scientific_review_page()
