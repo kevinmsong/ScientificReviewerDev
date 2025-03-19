@@ -180,32 +180,23 @@ def adjust_prompt_style(prompt: str, style: int, rating_scale: str) -> str:
     
     return f"{prompt}\n\nApproach: {styles[style]}\nScoring: {scale_info[rating_scale]}"
 
+<<<<<<< Tabnine <<<<<<<
 def process_chunk_memoryless(chunk: str, agent: Union[ChatOpenAI, Any], expertise: str, prompt: str, model_type: str) -> str:
     logging.info(f"Processing chunk for {expertise}")
     logging.info(f"Chunk preview: {chunk[:200]}...")
-    # Calculate available tokens for content
-    try:pt_tokens = count_tokens(prompt)
-        if model_type in ["GPT-4o", "o3-mini"]: # Leave room for response
-            response = agent.invoke([HumanMessage(content=prompt + "\n\nDocument Content:\n" + chunk)])
-            return response.content
-        else:chunk_content(chunk, max_content_tokens)
-            response = agent.generate_content(prompt + "\n\nDocument Content:\n" + chunk)
-            return response.text
-    except Exception as e:n enumerate(chunks):
-        logging.error(f"Error processing chunk for {expertise}: {str(e)}")
-        return f"[Error: {str(e)}]"4o", "o3-mini"]:
-                full_prompt = prompt + "\n\nDocument Content (Part " + str(i+1) + "/" + str(len(chunks)) + "):\n" + content_chunk
-                response = agent.invoke([HumanMessage(content=full_prompt)])
-                responses.append(response.content)
-            else:
-                full_prompt = prompt + "\n\nDocument Content (Part " + str(i+1) + "/" + str(len(chunks)) + "):\n" + content_chunk
-                response = agent.generate_content(full_prompt)
-                responses.append(response.text)
-        except Exception as e:
-            logging.error(f"Error processing chunk {i+1} for {expertise}: {str(e)}")
-            responses.append(f"[Error in part {i+1}: {str(e)}]")
     
-    return "\n\n---\n\n".join(responses)
+    full_prompt = prompt + "\n\nDocument Content:\n" + chunk
+    
+    try:
+        if model_type in ["GPT-4o", "o3-mini"]:
+            response = agent.invoke([HumanMessage(content=full_prompt)])
+            return response.content
+        else:
+            response = agent.generate_content(full_prompt)
+            return response.text
+    except Exception as e:
+        logging.error(f"Error processing chunk for {expertise}: {str(e)}")
+        return f"[Error: {str(e)}]"
 
 def extract_pdf_content(pdf_file) -> Tuple[str, List[Image.Image]]:
     logging.info("Starting PDF extraction")
