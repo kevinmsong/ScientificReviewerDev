@@ -59,18 +59,16 @@ def create_memoryless_agents(expertises: List[Dict], include_moderator: bool = F
         if expertise["model"] == "GPT-4o":
             temp = 0.1 + (expertise.get("style", 0) * 0.1)
             temp = max(0.1, min(0.7, temp))
-            agent = ChatOpenAI(temperature=temp, openai_api_key=st.secrets["openai_api_key"], model="gpt-4o")
+            agent = ChatOpenAI(temperature=temp, openai_api_key=st.secrets["openai_api_key"], model="gpt-4")
         elif expertise["model"] == "o3-mini":
-            temp = 0.1 + (expertise.get("style", 0) * 0.1)
-            temp = max(0.1, min(0.7, temp))
-            agent = ChatOpenAI(temperature=temp, openai_api_key=st.secrets["openai_api_key"], model="o3-mini")
+            agent = ChatOpenAI(openai_api_key=st.secrets["openai_api_key"], model="gpt-3.5-turbo")
         else:
             genai.configure(api_key=st.secrets["gemini_api_key"])
             agent = genai.GenerativeModel("gemini-2.0-flash-exp")
         agents.append(agent)
     
     if include_moderator:
-        moderator_agent = ChatOpenAI(temperature=0.1, openai_api_key=st.secrets["openai_api_key"], model="gpt-4o")
+        moderator_agent = ChatOpenAI(temperature=0.1, openai_api_key=st.secrets["openai_api_key"], model="gpt-4")
         agents.append(moderator_agent)
     
     return agents
@@ -614,10 +612,7 @@ def process_expert_dialogue(agent: Union[ChatOpenAI, Any], dialogue_prompt: str,
         for r in other_reviews
     ])
     
-    if model_type == "GPT-4o":
-        final_prompt = dialogue_prompt
-    else:
-        final_prompt = f"""Response to Other Reviews of Paper
+    final_prompt = f"""Response to Other Reviews of Paper
 
 These are the actual reviews to address:
 {review_quotes}
@@ -635,7 +630,7 @@ REQUIREMENTS:
 {dialogue_prompt}"""
     
     try:
-        if model_type == "GPT-4o":
+        if isinstance(agent, ChatOpenAI):
             response = agent.invoke([HumanMessage(content=final_prompt)])
             return response.content
         else:
