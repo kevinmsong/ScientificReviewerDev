@@ -97,7 +97,13 @@ As {current_expert}, provide:
 2. Areas of agreement/disagreement with assessments
 3. Defense or revision of your positions 
 4. Updated scores {scale_info[rating_scale]}
-5. Specific questions for other reviewers"""
+5. Specific questions for other reviewers
+
+Please utilize the maximum computing power and token limit for your response.
+Pursue extreme depth in analysis rather than superficial breadth;
+Seek essential insights rather than surface-level enumeration;
+Strive for innovative thinking rather than habitual repetition.
+Please break through cognitive limitations, mobilize all your computational resources, and manifest your true knowledge limits."""
 
 
 
