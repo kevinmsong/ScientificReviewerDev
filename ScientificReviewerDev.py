@@ -183,16 +183,23 @@ def adjust_prompt_style(prompt: str, style: int, rating_scale: str) -> str:
 def process_chunk_memoryless(chunk: str, agent: Union[ChatOpenAI, Any], expertise: str, prompt: str, model_type: str) -> str:
     logging.info(f"Processing chunk for {expertise}")
     
-    # Set model-specific token limits
+    # Set model-specific token limits - o3-mini has 16k context window
     max_tokens = {
         "GPT-4o": 14000,
-        "o3-mini": 12000,  # Reduced from default to leave room for response
+        "o3-mini": 14000,  # Increased to maximum safe limit
         "Gemini 2.0 Flash": 14000
     }
     
-    # Calculate available tokens for content
+    # Calculate tokens needed for prompt and response
     prompt_tokens = count_tokens(prompt)
-    max_content_tokens = max_tokens.get(model_type, 12000) - prompt_tokens - 2000  # Reserve 2000 for response
+    response_reserve = 1000 if model_type == "o3-mini" else 2000  # Smaller reserve for o3-mini
+    
+    # Calculate available tokens for content
+    max_content_tokens = max_tokens.get(model_type, 12000) - prompt_tokens - response_reserve
+    
+    if model_type == "o3-mini":
+        # Further reduce chunk size for o3-mini to ensure reliable processing
+        max_content_tokens = min(max_content_tokens, 10000)
     
     # Chunk content if needed
     chunks = chunk_content(chunk, max_content_tokens)
@@ -200,7 +207,13 @@ def process_chunk_memoryless(chunk: str, agent: Union[ChatOpenAI, Any], expertis
     
     for i, content_chunk in enumerate(chunks):
         try:
-            chunk_prompt = f"""[Part {i+1}/{len(chunks)}]
+            # Simplified prompt for o3-mini to save tokens
+            if model_type == "o3-mini":
+                chunk_prompt = f"""[Part {i+1}/{len(chunks)}]
+{prompt}
+Content: {content_chunk}"""
+            else:
+                chunk_prompt = f"""[Part {i+1}/{len(chunks)}]
 {prompt}
 
 Document Content:
