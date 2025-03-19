@@ -180,7 +180,6 @@ def adjust_prompt_style(prompt: str, style: int, rating_scale: str) -> str:
     
     return f"{prompt}\n\nApproach: {styles[style]}\nScoring: {scale_info[rating_scale]}"
 
-<<<<<<< Tabnine <<<<<<<
 def process_chunk_memoryless(chunk: str, agent: Union[ChatOpenAI, Any], expertise: str, prompt: str, model_type: str) -> str:
     logging.info(f"Processing chunk for {expertise}")
     logging.info(f"Chunk preview: {chunk[:200]}...")
