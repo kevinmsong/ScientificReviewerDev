@@ -452,7 +452,7 @@ def generate_pdf_summary(all_reviews: List[List[Dict]], scores: List[float], fin
 def scientific_review_page():
     st.set_page_config(page_title="Scientific Reviewer", layout="wide")
     st.header("Scientific Review System")
-    st.caption("v2.3.0 - Enhanced Dialogue Mode")
+    st.caption("v2.4.0")
     
     col1, col2 = st.columns([2,1])
     with col1:
