@@ -662,22 +662,21 @@ def chunk_content(text: str, max_tokens: int = 14000, model: str = "gpt-3.5-turb
             words = paragraph.split()
             temp_chunk = ""
             for word in words:
-
-
-
-
-
-
-
-
-
-
-
-
-
-```             current_chunk += "\n\n" + paragraph if current_chunk else paragraph        if current_tokens + paragraph_tokens < max_tokens:        # Check if adding paragraph exceeds limit                        continue                chunks.append(temp_chunk.strip())            if temp_chunk:                    temp_chunk = word                    chunks.append(temp_chunk.strip())                else:                    temp_chunk += " " + word                if count_tokens(temp_chunk + " " + word, model) < max_tokens:            current_tokens += paragraph_tokens
+                if count_tokens(temp_chunk + " " + word, model) < max_tokens:
+                    temp_chunk += " " + word if temp_chunk else word
+                else:
+                    if temp_chunk:
+                        chunks.append(temp_chunk.strip())
+                    temp_chunk = word
+            if temp_chunk:
+                chunks.append(temp_chunk.strip())
+        # Check if adding paragraph exceeds limit
+        elif current_tokens + paragraph_tokens < max_tokens:
+            current_chunk += "\n\n" + paragraph if current_chunk else paragraph
+            current_tokens += paragraph_tokens
         else:
-            chunks.append(current_chunk)
+            if current_chunk:
+                chunks.append(current_chunk)
             current_chunk = paragraph
             current_tokens = paragraph_tokens
     
