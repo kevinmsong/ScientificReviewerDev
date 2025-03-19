@@ -472,32 +472,32 @@ def scientific_review_page():
     
     use_moderator = st.checkbox("Include Moderator", value=True) if num_reviewers > 1 else False
     
+    # Add single critique style slider before reviewer configuration
+    critique_style = st.slider(
+        "Review Style",
+        min_value=-2,
+        max_value=2,
+        value=-1,
+        help="Global review style:\n-2: Extremely harsh\n-1: High standards\n0: Balanced\n1: Constructive\n2: Encouraging"
+    )
+    
     expertises = []
     custom_prompts = []
     
     with st.expander("Configure Reviewers", expanded=True):
         for i in range(num_reviewers):
             st.subheader(f"Reviewer {i+1}")
-            col1, col2, col3 = st.columns([1, 2, 1])
+            col1, col2 = st.columns([1, 2])  # Changed from 3 columns to 2
             with col1:
                 expertise = st.text_input(f"Expertise", value=f"Expert {i+1}", key=f"expertise_{i}")
                 model_type = st.selectbox("Model", ["GPT-4o", "Gemini 2.0 Flash", "o3-mini"], key=f"model_{i}")
             with col2:
                 prompt = st.text_area("Review Guidelines", value=get_default_prompt(review_type, expertise), key=f"prompt_{i}")
-            with col3:
-                critique_style = st.slider(
-                    "Critique Style",
-                    min_value=-2,
-                    max_value=2,
-                    value=-1,
-                    help="-2: Extremely harsh, 2: Extremely lenient",
-                    key=f"style_{i}"
-                )
             
             expertises.append({
                 "name": expertise,
                 "model": model_type,
-                "style": critique_style
+                "style": critique_style  # Use the global critique_style for all reviewers
             })
             custom_prompts.append(adjust_prompt_style(prompt, critique_style, rating_scale))
     
