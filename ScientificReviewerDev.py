@@ -60,6 +60,10 @@ def create_memoryless_agents(expertises: List[Dict], include_moderator: bool = F
             temp = 0.1 + (expertise.get("style", 0) * 0.1)
             temp = max(0.1, min(0.7, temp))
             agent = ChatOpenAI(temperature=temp, openai_api_key=st.secrets["openai_api_key"], model="gpt-4o")
+        elif expertise["model"] == "o3-mini":
+            temp = 0.1 + (expertise.get("style", 0) * 0.1)
+            temp = max(0.1, min(0.7, temp))
+            agent = ChatOpenAI(temperature=temp, openai_api_key=st.secrets["openai_api_key"], model="o3-mini")
         else:
             genai.configure(api_key=st.secrets["gemini_api_key"])
             agent = genai.GenerativeModel("gemini-2.0-flash-exp")
@@ -183,7 +187,7 @@ def process_chunk_memoryless(chunk: str, agent: Union[ChatOpenAI, Any], expertis
     logging.info(f"Chunk preview: {chunk[:200]}...")
     
     try:
-        if model_type == "GPT-4o":
+        if model_type in ["GPT-4o", "o3-mini"]:
             response = agent.invoke([HumanMessage(content=prompt + "\n\nDocument Content:\n" + chunk)])
             return response.content
         else:
@@ -477,7 +481,7 @@ def scientific_review_page():
             col1, col2, col3 = st.columns([1, 2, 1])
             with col1:
                 expertise = st.text_input(f"Expertise", value=f"Expert {i+1}", key=f"expertise_{i}")
-                model_type = st.selectbox("Model", ["GPT-4o", "Gemini 2.0 Flash"], key=f"model_{i}")
+                model_type = st.selectbox("Model", ["GPT-4o", "Gemini 2.0 Flash", "o3-mini"], key=f"model_{i}")
             with col2:
                 prompt = st.text_area("Review Guidelines", value=get_default_prompt(review_type, expertise), key=f"prompt_{i}")
             with col3:
